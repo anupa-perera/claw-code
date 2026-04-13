@@ -11,6 +11,7 @@ pub enum ProviderClient {
     Anthropic(AnthropicClient),
     Xai(OpenAiCompatClient),
     OpenAi(OpenAiCompatClient),
+    OpenRouter(OpenAiCompatClient),
 }
 
 impl ProviderClient {
@@ -18,12 +19,12 @@ impl ProviderClient {
         Self::from_model_with_anthropic_auth(model, None)
     }
 
-    pub fn from_model_with_anthropic_auth(
-        model: &str,
+    pub fn from_model_and_provider_kind(
+        _model: &str,
+        provider_kind: ProviderKind,
         anthropic_auth: Option<AuthSource>,
     ) -> Result<Self, ApiError> {
-        let resolved_model = providers::resolve_model_alias(model);
-        match providers::detect_provider_kind(&resolved_model) {
+        match provider_kind {
             ProviderKind::Anthropic => Ok(Self::Anthropic(match anthropic_auth {
                 Some(auth) => AnthropicClient::from_auth(auth),
                 None => AnthropicClient::from_env()?,
@@ -34,7 +35,22 @@ impl ProviderClient {
             ProviderKind::OpenAi => Ok(Self::OpenAi(OpenAiCompatClient::from_env(
                 OpenAiCompatConfig::openai(),
             )?)),
+            ProviderKind::OpenRouter => Ok(Self::OpenRouter(OpenAiCompatClient::from_env(
+                OpenAiCompatConfig::openrouter(),
+            )?)),
         }
+    }
+
+    pub fn from_model_with_anthropic_auth(
+        model: &str,
+        anthropic_auth: Option<AuthSource>,
+    ) -> Result<Self, ApiError> {
+        let resolved_model = providers::resolve_model_alias(model);
+        Self::from_model_and_provider_kind(
+            &resolved_model,
+            providers::detect_provider_kind(&resolved_model),
+            anthropic_auth,
+        )
     }
 
     #[must_use]
@@ -43,6 +59,7 @@ impl ProviderClient {
             Self::Anthropic(_) => ProviderKind::Anthropic,
             Self::Xai(_) => ProviderKind::Xai,
             Self::OpenAi(_) => ProviderKind::OpenAi,
+            Self::OpenRouter(_) => ProviderKind::OpenRouter,
         }
     }
 
@@ -58,7 +75,7 @@ impl ProviderClient {
     pub fn prompt_cache_stats(&self) -> Option<PromptCacheStats> {
         match self {
             Self::Anthropic(client) => client.prompt_cache_stats(),
-            Self::Xai(_) | Self::OpenAi(_) => None,
+            Self::Xai(_) | Self::OpenAi(_) | Self::OpenRouter(_) => None,
         }
     }
 
@@ -66,7 +83,7 @@ impl ProviderClient {
     pub fn take_last_prompt_cache_record(&self) -> Option<PromptCacheRecord> {
         match self {
             Self::Anthropic(client) => client.take_last_prompt_cache_record(),
-            Self::Xai(_) | Self::OpenAi(_) => None,
+            Self::Xai(_) | Self::OpenAi(_) | Self::OpenRouter(_) => None,
         }
     }
 
@@ -76,7 +93,9 @@ impl ProviderClient {
     ) -> Result<MessageResponse, ApiError> {
         match self {
             Self::Anthropic(client) => client.send_message(request).await,
-            Self::Xai(client) | Self::OpenAi(client) => client.send_message(request).await,
+            Self::Xai(client) | Self::OpenAi(client) | Self::OpenRouter(client) => {
+                client.send_message(request).await
+            }
         }
     }
 
@@ -89,7 +108,7 @@ impl ProviderClient {
                 .stream_message(request)
                 .await
                 .map(MessageStream::Anthropic),
-            Self::Xai(client) | Self::OpenAi(client) => client
+            Self::Xai(client) | Self::OpenAi(client) | Self::OpenRouter(client) => client
                 .stream_message(request)
                 .await
                 .map(MessageStream::OpenAiCompat),

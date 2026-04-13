@@ -6,6 +6,7 @@ use crate::types::{MessageRequest, MessageResponse};
 
 pub mod anthropic;
 pub mod openai_compat;
+pub mod openrouter;
 
 #[allow(dead_code)]
 pub type ProviderFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, ApiError>> + Send + 'a>>;
@@ -30,6 +31,7 @@ pub enum ProviderKind {
     Anthropic,
     Xai,
     OpenAi,
+    OpenRouter,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,7 +137,7 @@ pub fn resolve_model_alias(model: &str) -> String {
                     "grok-2" => "grok-2",
                     _ => trimmed,
                 },
-                ProviderKind::OpenAi => trimmed,
+                ProviderKind::OpenAi | ProviderKind::OpenRouter => trimmed,
             })
         })
         .map_or_else(|| trimmed.to_string(), ToOwned::to_owned)
@@ -160,6 +162,14 @@ pub fn metadata_for_model(model: &str) -> Option<ProviderMetadata> {
             default_base_url: openai_compat::DEFAULT_XAI_BASE_URL,
         });
     }
+    if canonical.contains('/') {
+        return Some(ProviderMetadata {
+            provider: ProviderKind::OpenRouter,
+            auth_env: "OPENROUTER_API_KEY",
+            base_url_env: "OPENROUTER_BASE_URL",
+            default_base_url: openrouter::DEFAULT_BASE_URL,
+        });
+    }
     None
 }
 
@@ -176,6 +186,9 @@ pub fn detect_provider_kind(model: &str) -> ProviderKind {
     }
     if openai_compat::has_api_key("XAI_API_KEY") {
         return ProviderKind::Xai;
+    }
+    if openai_compat::has_api_key("OPENROUTER_API_KEY") {
+        return ProviderKind::OpenRouter;
     }
     ProviderKind::Anthropic
 }
@@ -207,6 +220,10 @@ mod tests {
         assert_eq!(
             detect_provider_kind("claude-sonnet-4-6"),
             ProviderKind::Anthropic
+        );
+        assert_eq!(
+            detect_provider_kind("openai/gpt-4o"),
+            ProviderKind::OpenRouter
         );
     }
 

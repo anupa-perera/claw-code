@@ -14,10 +14,16 @@ pub use prompt_cache::{
     CacheBreakEvent, PromptCache, PromptCacheConfig, PromptCachePaths, PromptCacheRecord,
     PromptCacheStats,
 };
+pub use providers::anthropic::has_auth_from_env_or_saved as has_anthropic_auth_from_env_or_saved;
 pub use providers::anthropic::{AnthropicClient, AnthropicClient as ApiClient, AuthSource};
 pub use providers::openai_compat::{OpenAiCompatClient, OpenAiCompatConfig};
+pub use providers::openrouter::{
+    read_base_url as read_openrouter_base_url, OpenRouterCatalogClient, OpenRouterModel,
+    OpenRouterPricing, OpenRouterTopProvider,
+};
 pub use providers::{
-    detect_provider_kind, max_tokens_for_model, resolve_model_alias, ProviderKind,
+    detect_provider_kind, max_tokens_for_model, metadata_for_model, resolve_model_alias,
+    ProviderKind,
 };
 pub use sse::{parse_frame, SseParser};
 pub use types::{

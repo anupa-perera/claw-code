@@ -160,6 +160,66 @@ fn config_command_loads_defaults_from_standard_config_locations() {
     fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
 }
 
+#[test]
+fn prompt_mode_requires_explicit_model_when_only_openrouter_key_is_present() {
+    // given
+    let temp_dir = unique_temp_dir("openrouter-noninteractive");
+    fs::create_dir_all(&temp_dir).expect("temp dir should exist");
+
+    // when
+    let output = command_in(&temp_dir)
+        .env("OPENROUTER_API_KEY", "or-test-key")
+        .env_remove("ANTHROPIC_API_KEY")
+        .env_remove("ANTHROPIC_AUTH_TOKEN")
+        .args(["prompt", "hello from openrouter"])
+        .output()
+        .expect("claw should launch");
+
+    // then
+    assert!(
+        !output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
+    assert!(stderr.contains("No model is configured"));
+    assert!(stderr.contains("pass --model <model-id>"));
+
+    fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
+}
+
+#[test]
+fn prompt_mode_requires_explicit_model_when_only_anthropic_auth_is_present() {
+    // given
+    let temp_dir = unique_temp_dir("anthropic-noninteractive");
+    fs::create_dir_all(&temp_dir).expect("temp dir should exist");
+
+    // when
+    let output = command_in(&temp_dir)
+        .env("ANTHROPIC_API_KEY", "ant-test-key")
+        .env_remove("ANTHROPIC_AUTH_TOKEN")
+        .env_remove("OPENROUTER_API_KEY")
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("XAI_API_KEY")
+        .args(["prompt", "hello from anthropic"])
+        .output()
+        .expect("claw should launch");
+
+    // then
+    assert!(
+        !output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
+    assert!(stderr.contains("No model is configured"));
+    assert!(stderr.contains("pass --model <model-id>"));
+
+    fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
+}
+
 fn command_in(cwd: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_claw"));
     command.current_dir(cwd);

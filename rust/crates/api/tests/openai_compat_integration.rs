@@ -6,8 +6,8 @@ use std::sync::{Mutex as StdMutex, OnceLock};
 use api::{
     ContentBlockDelta, ContentBlockDeltaEvent, ContentBlockStartEvent, ContentBlockStopEvent,
     InputContentBlock, InputMessage, MessageDeltaEvent, MessageRequest, OpenAiCompatClient,
-    OpenAiCompatConfig, OutputContentBlock, ProviderClient, StreamEvent, ToolChoice,
-    ToolDefinition,
+    OpenAiCompatConfig, OpenRouterCatalogClient, OutputContentBlock, ProviderClient, StreamEvent,
+    ToolChoice, ToolDefinition,
 };
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -307,6 +307,60 @@ async fn provider_client_dispatches_xai_requests_from_env() {
     assert_eq!(
         request.headers.get("authorization").map(String::as_str),
         Some("Bearer xai-test-key")
+    );
+}
+
+#[tokio::test]
+async fn openrouter_catalog_lists_models_from_user_endpoint() {
+    let state = Arc::new(Mutex::new(Vec::<CapturedRequest>::new()));
+    let body = concat!(
+        "{",
+        "\"data\":[",
+        "{",
+        "\"id\":\"openai/gpt-4o\",",
+        "\"canonical_slug\":\"openai/gpt-4o\",",
+        "\"name\":\"GPT-4o\",",
+        "\"description\":\"flagship\",",
+        "\"pricing\":{\"prompt\":\"0.000005\",\"completion\":\"0.000015\",\"request\":\"0\",\"image\":\"0\"},",
+        "\"context_length\":128000,",
+        "\"top_provider\":{\"context_length\":128000,\"max_completion_tokens\":16384,\"is_moderated\":true},",
+        "\"supported_parameters\":[\"temperature\"]",
+        "},",
+        "{",
+        "\"id\":\"anthropic/claude-3.7-sonnet\",",
+        "\"canonical_slug\":\"anthropic/claude-3.7-sonnet\",",
+        "\"name\":\"Claude 3.7 Sonnet\",",
+        "\"description\":\"reasoning\",",
+        "\"pricing\":{\"prompt\":\"0.000003\",\"completion\":\"0.000015\",\"request\":\"0\",\"image\":\"0\"},",
+        "\"context_length\":200000,",
+        "\"top_provider\":{\"context_length\":200000,\"max_completion_tokens\":8192,\"is_moderated\":true},",
+        "\"supported_parameters\":[\"temperature\",\"top_p\"]",
+        "}",
+        "]",
+        "}"
+    );
+    let server = spawn_server(
+        state.clone(),
+        vec![http_response("200 OK", "application/json", body)],
+    )
+    .await;
+
+    let client = OpenRouterCatalogClient::new("or-test-key").with_base_url(server.base_url());
+    let models = client
+        .list_models()
+        .await
+        .expect("catalog request should succeed");
+
+    assert_eq!(models.len(), 2);
+    assert_eq!(models[0].id, "anthropic/claude-3.7-sonnet");
+    assert_eq!(models[1].id, "openai/gpt-4o");
+
+    let captured = state.lock().await;
+    let request = captured.first().expect("server should capture request");
+    assert_eq!(request.path, "/models/user");
+    assert_eq!(
+        request.headers.get("authorization").map(String::as_str),
+        Some("Bearer or-test-key")
     );
 }
 

@@ -24,9 +24,12 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use api::{
-    resolve_startup_auth_source, AnthropicClient, AuthSource, ContentBlockDelta, InputContentBlock,
-    InputMessage, MessageRequest, MessageResponse, OutputContentBlock, PromptCache,
-    StreamEvent as ApiStreamEvent, ToolChoice, ToolDefinition, ToolResultContentBlock,
+    detect_provider_kind, has_anthropic_auth_from_env_or_saved, max_tokens_for_model,
+    metadata_for_model, resolve_model_alias, resolve_startup_auth_source, AnthropicClient,
+    AuthSource, ContentBlockDelta, InputContentBlock, InputMessage, MessageRequest,
+    MessageResponse, OpenRouterCatalogClient, OpenRouterModel, OutputContentBlock, PromptCache,
+    ProviderClient, ProviderKind, StreamEvent as ApiStreamEvent, ToolChoice, ToolDefinition,
+    ToolResultContentBlock,
 };
 
 use commands::{
@@ -53,13 +56,7 @@ use serde_json::json;
 use tools::{GlobalToolRegistry, RuntimeToolDefinition, ToolSearchOutput};
 
 const DEFAULT_MODEL: &str = "claude-opus-4-6";
-fn max_tokens_for_model(model: &str) -> u32 {
-    if model.contains("opus") {
-        32_000
-    } else {
-        64_000
-    }
-}
+const UNCONFIGURED_MODEL_LABEL: &str = "unconfigured (choose on startup)";
 const DEFAULT_DATE: &str = "2026-03-31";
 const DEFAULT_OAUTH_CALLBACK_PORT: u16 = 4545;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -120,25 +117,38 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         } => resume_session(&session_path, &commands),
         CliAction::Status {
             model,
+            model_source,
             permission_mode,
-        } => print_status_snapshot(&model, permission_mode)?,
+        } => print_status_snapshot(
+            &resolve_effective_model(&model, model_source),
+            permission_mode,
+        )?,
         CliAction::Sandbox => print_sandbox_status_snapshot()?,
         CliAction::Prompt {
             prompt,
             model,
+            model_source,
             output_format,
             allowed_tools,
             permission_mode,
-        } => LiveCli::new(model, true, allowed_tools, permission_mode)?
-            .run_turn_with_output(&prompt, output_format)?,
+        } => LiveCli::new(
+            model,
+            model_source,
+            true,
+            allowed_tools,
+            permission_mode,
+            false,
+        )?
+        .run_turn_with_output(&prompt, output_format)?,
         CliAction::Login => run_login()?,
         CliAction::Logout => run_logout()?,
         CliAction::Init => run_init()?,
         CliAction::Repl {
             model,
+            model_source,
             allowed_tools,
             permission_mode,
-        } => run_repl(model, allowed_tools, permission_mode)?,
+        } => run_repl(model, model_source, allowed_tools, permission_mode)?,
         CliAction::Help => print_help(),
     }
     Ok(())
@@ -168,12 +178,14 @@ enum CliAction {
     },
     Status {
         model: String,
+        model_source: ModelSource,
         permission_mode: PermissionMode,
     },
     Sandbox,
     Prompt {
         prompt: String,
         model: String,
+        model_source: ModelSource,
         output_format: CliOutputFormat,
         allowed_tools: Option<AllowedToolSet>,
         permission_mode: PermissionMode,
@@ -183,6 +195,7 @@ enum CliAction {
     Init,
     Repl {
         model: String,
+        model_source: ModelSource,
         allowed_tools: Option<AllowedToolSet>,
         permission_mode: PermissionMode,
     },
@@ -194,6 +207,12 @@ enum CliAction {
 enum CliOutputFormat {
     Text,
     Json,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelSource {
+    Default,
+    Cli,
 }
 
 impl CliOutputFormat {
@@ -211,6 +230,7 @@ impl CliOutputFormat {
 #[allow(clippy::too_many_lines)]
 fn parse_args(args: &[String]) -> Result<CliAction, String> {
     let mut model = DEFAULT_MODEL.to_string();
+    let mut model_source = ModelSource::Default;
     let mut output_format = CliOutputFormat::Text;
     let mut permission_mode = default_permission_mode();
     let mut wants_help = false;
@@ -233,11 +253,13 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                 let value = args
                     .get(index + 1)
                     .ok_or_else(|| "missing value for --model".to_string())?;
-                model = resolve_model_alias(value).to_string();
+                model = resolve_model_alias(value);
+                model_source = ModelSource::Cli;
                 index += 2;
             }
             flag if flag.starts_with("--model=") => {
-                model = resolve_model_alias(&flag[8..]).to_string();
+                model = resolve_model_alias(&flag[8..]);
+                model_source = ModelSource::Cli;
                 index += 1;
             }
             "--output-format" => {
@@ -274,7 +296,8 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                 }
                 return Ok(CliAction::Prompt {
                     prompt,
-                    model: resolve_model_alias(&model).to_string(),
+                    model: resolve_model_alias(&model),
+                    model_source,
                     output_format,
                     allowed_tools: normalize_allowed_tools(&allowed_tool_values)?,
                     permission_mode,
@@ -332,6 +355,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
     if rest.is_empty() {
         return Ok(CliAction::Repl {
             model,
+            model_source,
             allowed_tools,
             permission_mode,
         });
@@ -339,7 +363,9 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
     if rest.first().map(String::as_str) == Some("--resume") {
         return parse_resume_args(&rest[1..]);
     }
-    if let Some(action) = parse_single_word_command_alias(&rest, &model, permission_mode) {
+    if let Some(action) =
+        parse_single_word_command_alias(&rest, &model, model_source, permission_mode)
+    {
         return action;
     }
 
@@ -367,6 +393,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             Ok(CliAction::Prompt {
                 prompt,
                 model,
+                model_source,
                 output_format,
                 allowed_tools,
                 permission_mode,
@@ -376,6 +403,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
         _other => Ok(CliAction::Prompt {
             prompt: rest.join(" "),
             model,
+            model_source,
             output_format,
             allowed_tools,
             permission_mode,
@@ -386,6 +414,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
 fn parse_single_word_command_alias(
     rest: &[String],
     model: &str,
+    model_source: ModelSource,
     permission_mode: PermissionMode,
 ) -> Option<Result<CliAction, String>> {
     if rest.len() != 1 {
@@ -397,6 +426,7 @@ fn parse_single_word_command_alias(
         "version" => Some(Ok(CliAction::Version)),
         "status" => Some(Ok(CliAction::Status {
             model: model.to_string(),
+            model_source,
             permission_mode,
         })),
         "sandbox" => Some(Ok(CliAction::Sandbox)),
@@ -578,13 +608,43 @@ fn levenshtein_distance(left: &str, right: &str) -> usize {
     previous[right_chars.len()]
 }
 
-fn resolve_model_alias(model: &str) -> &str {
-    match model {
-        "opus" => "claude-opus-4-6",
-        "sonnet" => "claude-sonnet-4-6",
-        "haiku" => "claude-haiku-4-5-20251213",
-        _ => model,
+fn configured_model_for_current_dir() -> Option<String> {
+    let cwd = env::current_dir().ok()?;
+    let loader = ConfigLoader::default_for(&cwd);
+    loader.load().ok()?.model().map(resolve_model_alias)
+}
+
+fn resolve_effective_model(model: &str, model_source: ModelSource) -> String {
+    match model_source {
+        ModelSource::Cli => resolve_model_alias(model),
+        ModelSource::Default => configured_model_for_current_dir()
+            .unwrap_or_else(|| UNCONFIGURED_MODEL_LABEL.to_string()),
     }
+}
+
+fn has_non_empty_env_var(key: &str) -> bool {
+    env::var(key)
+        .ok()
+        .is_some_and(|value| !value.trim().is_empty())
+}
+
+fn has_openai_api_key() -> bool {
+    has_non_empty_env_var("OPENAI_API_KEY")
+}
+
+fn has_xai_api_key() -> bool {
+    has_non_empty_env_var("XAI_API_KEY")
+}
+
+fn explicit_provider_for_model(model: &str) -> Option<ProviderKind> {
+    metadata_for_model(model).map(|metadata| metadata.provider)
+}
+
+fn resolve_provider_override(
+    model: &str,
+    current_override: Option<ProviderKind>,
+) -> Option<ProviderKind> {
+    explicit_provider_for_model(model).or(current_override)
 }
 
 fn normalize_allowed_tools(values: &[String]) -> Result<Option<AllowedToolSet>, String> {
@@ -1518,10 +1578,18 @@ fn run_resume_command(
 
 fn run_repl(
     model: String,
+    model_source: ModelSource,
     allowed_tools: Option<AllowedToolSet>,
     permission_mode: PermissionMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut cli = LiveCli::new(model, true, allowed_tools, permission_mode)?;
+    let mut cli = LiveCli::new(
+        model,
+        model_source,
+        true,
+        allowed_tools,
+        permission_mode,
+        true,
+    )?;
     let mut editor =
         input::LineEditor::new("> ", cli.repl_completion_candidates().unwrap_or_default());
     println!("{}", cli.startup_banner());
@@ -1581,8 +1649,16 @@ struct ManagedSessionSummary {
     branch_name: Option<String>,
 }
 
+struct ModelBootstrap {
+    active_model: String,
+    provider_override: Option<ProviderKind>,
+    openrouter_models: Vec<OpenRouterModel>,
+}
+
 struct LiveCli {
     model: String,
+    provider_override: Option<ProviderKind>,
+    openrouter_models: Vec<OpenRouterModel>,
     allowed_tools: Option<AllowedToolSet>,
     permission_mode: PermissionMode,
     system_prompt: Vec<String>,
@@ -1604,7 +1680,7 @@ struct RuntimeMcpState {
 }
 
 struct BuiltRuntime {
-    runtime: Option<ConversationRuntime<AnthropicRuntimeClient, CliToolExecutor>>,
+    runtime: Option<ConversationRuntime<ProviderRuntimeClient, CliToolExecutor>>,
     plugin_registry: PluginRegistry,
     plugins_active: bool,
     mcp_state: Option<Arc<Mutex<RuntimeMcpState>>>,
@@ -1613,7 +1689,7 @@ struct BuiltRuntime {
 
 impl BuiltRuntime {
     fn new(
-        runtime: ConversationRuntime<AnthropicRuntimeClient, CliToolExecutor>,
+        runtime: ConversationRuntime<ProviderRuntimeClient, CliToolExecutor>,
         plugin_registry: PluginRegistry,
         mcp_state: Option<Arc<Mutex<RuntimeMcpState>>>,
     ) -> Self {
@@ -1658,7 +1734,7 @@ impl BuiltRuntime {
 }
 
 impl Deref for BuiltRuntime {
-    type Target = ConversationRuntime<AnthropicRuntimeClient, CliToolExecutor>;
+    type Target = ConversationRuntime<ProviderRuntimeClient, CliToolExecutor>;
 
     fn deref(&self) -> &Self::Target {
         self.runtime
@@ -2010,20 +2086,577 @@ impl HookAbortMonitor {
     }
 }
 
+fn has_openrouter_api_key() -> bool {
+    has_non_empty_env_var("OPENROUTER_API_KEY")
+}
+
+fn fetch_openrouter_catalog() -> Result<Vec<OpenRouterModel>, Box<dyn std::error::Error>> {
+    let client = OpenRouterCatalogClient::from_env()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    Ok(runtime.block_on(client.list_models())?)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CuratedModelOption {
+    label: &'static str,
+    model: &'static str,
+    note: &'static str,
+}
+
+fn available_startup_providers() -> Vec<ProviderKind> {
+    let mut providers = Vec::new();
+    if has_anthropic_auth_from_env_or_saved().unwrap_or(false) {
+        providers.push(ProviderKind::Anthropic);
+    }
+    if has_openai_api_key() {
+        providers.push(ProviderKind::OpenAi);
+    }
+    if has_openrouter_api_key() {
+        providers.push(ProviderKind::OpenRouter);
+    }
+    if has_xai_api_key() {
+        providers.push(ProviderKind::Xai);
+    }
+    providers
+}
+
+fn provider_from_startup_token(value: &str) -> Option<ProviderKind> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "anthropic" => Some(ProviderKind::Anthropic),
+        "openai" => Some(ProviderKind::OpenAi),
+        "openrouter" => Some(ProviderKind::OpenRouter),
+        "xai" | "x.ai" => Some(ProviderKind::Xai),
+        _ => None,
+    }
+}
+
+fn startup_provider_override() -> Option<ProviderKind> {
+    env::var("CLAW_STARTUP_PROVIDER")
+        .ok()
+        .and_then(|value| provider_from_startup_token(&value))
+}
+
+fn resolve_preselected_startup_provider(
+    available: &[ProviderKind],
+    requested: Option<ProviderKind>,
+) -> Result<Option<ProviderKind>, String> {
+    if let Some(provider) = requested {
+        return if available.contains(&provider) {
+            Ok(Some(provider))
+        } else {
+            Err(format!(
+                "{} is not currently configured for this session",
+                provider_display_name(provider)
+            ))
+        };
+    }
+
+    Ok((available.len() == 1).then_some(available[0]))
+}
+
+const fn provider_display_name(provider: ProviderKind) -> &'static str {
+    match provider {
+        ProviderKind::Anthropic => "Anthropic",
+        ProviderKind::OpenAi => "OpenAI",
+        ProviderKind::OpenRouter => "OpenRouter",
+        ProviderKind::Xai => "xAI",
+    }
+}
+
+const fn provider_credential_hint(provider: ProviderKind) -> &'static str {
+    match provider {
+        ProviderKind::Anthropic => "ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or `claw login`",
+        ProviderKind::OpenAi => "OPENAI_API_KEY",
+        ProviderKind::OpenRouter => "OPENROUTER_API_KEY",
+        ProviderKind::Xai => "XAI_API_KEY",
+    }
+}
+
+fn prompt_for_startup_provider() -> Result<ProviderKind, Box<dyn std::error::Error>> {
+    let available = available_startup_providers();
+    if available.is_empty() {
+        return Err(io::Error::other(
+            "No provider credentials were found. Configure ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, OPENAI_API_KEY, OPENROUTER_API_KEY, or XAI_API_KEY before starting a fresh interactive session.",
+        )
+        .into());
+    }
+
+    if let Some(provider) =
+        resolve_preselected_startup_provider(&available, startup_provider_override())
+            .map_err(io::Error::other)?
+    {
+        println!();
+        println!(
+            "Provider setup\n  No model is configured for this workspace yet.\n  Provider         {} (preselected for this session)\n  Next step        choose a model.",
+            provider_display_name(provider)
+        );
+        println!();
+        return Ok(provider);
+    }
+
+    loop {
+        println!();
+        println!(
+            "Provider setup\n  No model is configured for this workspace yet.\n  First run         choose a provider now, then pick a model in the next step.\n  Choose a provider for this session:"
+        );
+        for (index, provider) in available.iter().enumerate() {
+            println!(
+                "  {:>2}. {} ({})",
+                index + 1,
+                provider_display_name(*provider),
+                provider_credential_hint(*provider)
+            );
+        }
+        println!();
+        print!("Select a provider by number or 'q' to cancel: ");
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        let read = io::stdin().read_line(&mut input)?;
+        if read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Provider selection ended before a choice was made",
+            )
+            .into());
+        }
+
+        let input = input.trim();
+        if input.is_empty() {
+            continue;
+        }
+        if matches!(input, "q" | "quit" | "exit") {
+            return Err(
+                io::Error::new(io::ErrorKind::Interrupted, "Provider selection cancelled").into(),
+            );
+        }
+        let Ok(selection) = input.parse::<usize>() else {
+            println!("Please enter a provider number.");
+            continue;
+        };
+        if selection == 0 {
+            println!("Provider selections start at 1.");
+            continue;
+        }
+        if let Some(provider) = available.get(selection.saturating_sub(1)) {
+            return Ok(*provider);
+        }
+        println!("No provider matches selection {selection}.");
+    }
+}
+
+fn prompt_for_curated_model(
+    provider_name: &str,
+    choices: &[CuratedModelOption],
+) -> Result<String, Box<dyn std::error::Error>> {
+    loop {
+        println!();
+        println!("{provider_name} models");
+        for (index, choice) in choices.iter().enumerate() {
+            println!(
+                "  {:>2}. {} ({}){}",
+                index + 1,
+                choice.label,
+                choice.model,
+                if choice.note.is_empty() {
+                    String::new()
+                } else {
+                    format!(" · {}", choice.note)
+                }
+            );
+        }
+        println!();
+        print!("Select a model by number, type an alias/id, or 'q' to cancel: ");
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        let read = io::stdin().read_line(&mut input)?;
+        if read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                format!("{provider_name} model selection ended before a choice was made"),
+            )
+            .into());
+        }
+
+        let input = input.trim();
+        if input.is_empty() {
+            continue;
+        }
+        if matches!(input, "q" | "quit" | "exit") {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                format!("{provider_name} model selection cancelled"),
+            )
+            .into());
+        }
+        if let Ok(selection) = input.parse::<usize>() {
+            if selection == 0 {
+                println!("Model selections start at 1.");
+                continue;
+            }
+            if let Some(choice) = choices.get(selection.saturating_sub(1)) {
+                return Ok(choice.model.to_string());
+            }
+            println!("No model matches selection {selection}.");
+            continue;
+        }
+
+        let normalized = resolve_model_alias(input);
+        if let Some(choice) = choices.iter().find(|choice| {
+            choice.model.eq_ignore_ascii_case(&normalized)
+                || choice.model.eq_ignore_ascii_case(input)
+                || choice.label.eq_ignore_ascii_case(input)
+        }) {
+            return Ok(choice.model.to_string());
+        }
+
+        println!("No curated model matched '{input}'.");
+    }
+}
+
+fn prompt_for_manual_model(
+    provider_name: &str,
+    examples: &[&str],
+    disallow_provider_prefix: bool,
+) -> Result<String, Box<dyn std::error::Error>> {
+    loop {
+        println!();
+        println!(
+            "{provider_name} model setup\n  Enter an exact model id for this provider.\n  Examples         {}",
+            examples.join(", ")
+        );
+        print!("Model id (or 'q' to cancel): ");
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        let read = io::stdin().read_line(&mut input)?;
+        if read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                format!("{provider_name} model selection ended before a choice was made"),
+            )
+            .into());
+        }
+
+        let input = input.trim();
+        if input.is_empty() {
+            continue;
+        }
+        if matches!(input, "q" | "quit" | "exit") {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                format!("{provider_name} model selection cancelled"),
+            )
+            .into());
+        }
+        if disallow_provider_prefix && input.contains('/') {
+            println!(
+                "{provider_name} model ids should not include a provider prefix here. Try one of: {}",
+                examples.join(", ")
+            );
+            continue;
+        }
+        return Ok(input.to_string());
+    }
+}
+
+fn prompt_for_provider_model(
+    provider: ProviderKind,
+) -> Result<(String, Vec<OpenRouterModel>), Box<dyn std::error::Error>> {
+    match provider {
+        ProviderKind::Anthropic => Ok((
+            prompt_for_curated_model(
+                provider_display_name(provider),
+                &[
+                    CuratedModelOption {
+                        label: "Opus",
+                        model: "claude-opus-4-6",
+                        note: "deepest reasoning",
+                    },
+                    CuratedModelOption {
+                        label: "Sonnet",
+                        model: "claude-sonnet-4-6",
+                        note: "balanced default",
+                    },
+                    CuratedModelOption {
+                        label: "Haiku",
+                        model: "claude-haiku-4-5-20251213",
+                        note: "fastest / cheapest",
+                    },
+                ],
+            )?,
+            Vec::new(),
+        )),
+        ProviderKind::OpenAi => Ok((
+            prompt_for_manual_model(
+                provider_display_name(provider),
+                &["gpt-5", "gpt-5-mini", "gpt-4o"],
+                true,
+            )?,
+            Vec::new(),
+        )),
+        ProviderKind::OpenRouter => {
+            let openrouter_models = fetch_openrouter_catalog()?;
+            let active_model = prompt_for_openrouter_model(&openrouter_models)?;
+            Ok((active_model, openrouter_models))
+        }
+        ProviderKind::Xai => Ok((
+            prompt_for_curated_model(
+                provider_display_name(provider),
+                &[
+                    CuratedModelOption {
+                        label: "Grok 3",
+                        model: "grok-3",
+                        note: "general flagship",
+                    },
+                    CuratedModelOption {
+                        label: "Grok 3 Mini",
+                        model: "grok-3-mini",
+                        note: "smaller / faster",
+                    },
+                    CuratedModelOption {
+                        label: "Grok 2",
+                        model: "grok-2",
+                        note: "older compatibility option",
+                    },
+                ],
+            )?,
+            Vec::new(),
+        )),
+    }
+}
+
+fn bootstrap_model_selection(
+    requested_model: &str,
+    model_source: ModelSource,
+    interactive_startup: bool,
+) -> Result<ModelBootstrap, Box<dyn std::error::Error>> {
+    let configured_model = (model_source == ModelSource::Default)
+        .then(configured_model_for_current_dir)
+        .flatten();
+
+    let active_model = if model_source == ModelSource::Cli {
+        resolve_model_alias(requested_model)
+    } else if let Some(configured_model) = configured_model {
+        configured_model
+    } else if interactive_startup {
+        let provider = prompt_for_startup_provider()?;
+        let (active_model, openrouter_models) = prompt_for_provider_model(provider)?;
+        return Ok(ModelBootstrap {
+            active_model,
+            provider_override: Some(provider),
+            openrouter_models,
+        });
+    } else {
+        return Err(io::Error::other(
+            "No model is configured. Non-interactive runs cannot prompt for a provider or model; pass --model <model-id> or set \"model\" in .claw/settings.json.",
+        )
+        .into());
+    };
+    let provider_override = explicit_provider_for_model(&active_model);
+    let openrouter_models = if has_openrouter_api_key()
+        && resolve_provider_override(&active_model, provider_override)
+            == Some(ProviderKind::OpenRouter)
+    {
+        fetch_openrouter_catalog().unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    Ok(ModelBootstrap {
+        active_model,
+        provider_override,
+        openrouter_models,
+    })
+}
+
+fn prompt_for_openrouter_model(
+    models: &[OpenRouterModel],
+) -> Result<String, Box<dyn std::error::Error>> {
+    if models.is_empty() {
+        return Err(io::Error::other(
+            "OpenRouter returned no models for this account. Check your account/provider settings and try again.",
+        )
+        .into());
+    }
+
+    let mut visible = models
+        .iter()
+        .enumerate()
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let mut page = 0usize;
+
+    loop {
+        page = clamp_openrouter_page(page, visible.len());
+        print_openrouter_model_candidates(models, &visible, page);
+        print!(
+            "Select a model by number, type a search term, use n/p to page, type all to reset, paste an exact model id, or 'q' to cancel: "
+        );
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        let read = io::stdin().read_line(&mut input)?;
+        if read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "OpenRouter model selection ended before a choice was made",
+            )
+            .into());
+        }
+
+        let input = input.trim();
+        if input.is_empty() {
+            continue;
+        }
+        if matches!(input, "q" | "quit" | "exit") {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "OpenRouter model selection cancelled",
+            )
+            .into());
+        }
+        if matches!(input, "n" | "next") {
+            let last_page = openrouter_page_count(visible.len()).saturating_sub(1);
+            if page >= last_page {
+                println!("Already on the last page.");
+            } else {
+                page += 1;
+            }
+            continue;
+        }
+        if matches!(input, "p" | "prev" | "previous") {
+            if page == 0 {
+                println!("Already on the first page.");
+            } else {
+                page -= 1;
+            }
+            continue;
+        }
+        if matches!(input, "all" | "reset" | "*") {
+            visible = (0..models.len()).collect();
+            page = 0;
+            continue;
+        }
+        if let Ok(selection) = input.parse::<usize>() {
+            if selection == 0 {
+                println!("Model selections start at 1.");
+                continue;
+            }
+            if let Some(index) =
+                openrouter_page_model_indices(&visible, page).get(selection.saturating_sub(1))
+            {
+                return Ok(models[*index].id.clone());
+            }
+            println!("No model matches selection {selection} on this page.");
+            continue;
+        }
+        if let Some(model) = models.iter().find(|model| model.id == input) {
+            return Ok(model.id.clone());
+        }
+
+        let query = input.to_ascii_lowercase();
+        let filtered = models
+            .iter()
+            .enumerate()
+            .filter(|(_, model)| {
+                model.id.to_ascii_lowercase().contains(&query)
+                    || model.name.to_ascii_lowercase().contains(&query)
+                    || model.description.to_ascii_lowercase().contains(&query)
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+
+        if filtered.is_empty() {
+            println!("No OpenRouter models matched '{input}'.");
+            continue;
+        }
+
+        if filtered.len() == 1 {
+            return Ok(models[filtered[0]].id.clone());
+        }
+
+        visible = filtered;
+        page = 0;
+    }
+}
+
+const OPENROUTER_MODEL_PAGE_SIZE: usize = 20;
+
+fn openrouter_page_count(visible_len: usize) -> usize {
+    visible_len.max(1).div_ceil(OPENROUTER_MODEL_PAGE_SIZE)
+}
+
+fn clamp_openrouter_page(page: usize, visible_len: usize) -> usize {
+    page.min(openrouter_page_count(visible_len).saturating_sub(1))
+}
+
+fn openrouter_page_model_indices(visible: &[usize], page: usize) -> &[usize] {
+    let page = clamp_openrouter_page(page, visible.len());
+    let start = page.saturating_mul(OPENROUTER_MODEL_PAGE_SIZE);
+    let end = (start + OPENROUTER_MODEL_PAGE_SIZE).min(visible.len());
+    &visible[start..end]
+}
+
+fn print_openrouter_model_candidates(models: &[OpenRouterModel], visible: &[usize], page: usize) {
+    let page = clamp_openrouter_page(page, visible.len());
+    let page_count = openrouter_page_count(visible.len());
+    let page_models = openrouter_page_model_indices(visible, page);
+
+    println!();
+    println!(
+        "OpenRouter models\n  API key          detected\n  Available        {}\n  Filtered         {}\n  Page             {}/{}\n  Onboarding       type a provider or family name like openai, anthropic, google, deepseek, or qwen to narrow the list\n  Navigation       n next page, p previous page, all reset filter, or paste an exact model id",
+        models.len(),
+        visible.len(),
+        page + 1,
+        page_count
+    );
+
+    for (display_index, model_index) in page_models.iter().enumerate() {
+        let model = &models[*model_index];
+        println!(
+            "  {:>2}. {} ({}) · {} tokens",
+            display_index + 1,
+            model.name,
+            model.id,
+            model.context_length
+        );
+    }
+
+    if page_models.is_empty() {
+        println!("  No models match the current filter.");
+    } else if visible.len() > page_models.len() {
+        println!(
+            "  ... {} more match the current filter",
+            visible.len() - page_models.len()
+        );
+    }
+    println!();
+}
+
 impl LiveCli {
     fn new(
         model: String,
+        model_source: ModelSource,
         enable_tools: bool,
         allowed_tools: Option<AllowedToolSet>,
         permission_mode: PermissionMode,
+        interactive_startup: bool,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        let ModelBootstrap {
+            active_model,
+            provider_override,
+            openrouter_models,
+        } = bootstrap_model_selection(&model, model_source, interactive_startup)?;
         let system_prompt = build_system_prompt()?;
         let session_state = Session::new();
         let session = create_managed_session_handle(&session_state.session_id)?;
         let runtime = build_runtime(
             session_state.with_persistence_path(session.path.clone()),
             &session.id,
-            model.clone(),
+            active_model.clone(),
+            provider_override,
             system_prompt.clone(),
             enable_tools,
             true,
@@ -2032,7 +2665,9 @@ impl LiveCli {
             None,
         )?;
         let cli = Self {
-            model,
+            model: active_model,
+            provider_override,
+            openrouter_models,
             allowed_tools,
             permission_mode,
             system_prompt,
@@ -2090,6 +2725,7 @@ impl LiveCli {
     fn repl_completion_candidates(&self) -> Result<Vec<String>, Box<dyn std::error::Error>> {
         Ok(slash_command_completion_candidates_with_sessions(
             &self.model,
+            &self.openrouter_models,
             Some(&self.session.id),
             list_managed_sessions()?
                 .into_iter()
@@ -2107,6 +2743,7 @@ impl LiveCli {
             self.runtime.session().clone(),
             &self.session.id,
             self.model.clone(),
+            self.provider_override,
             self.system_prompt.clone(),
             true,
             emit_output,
@@ -2124,6 +2761,21 @@ impl LiveCli {
         self.runtime.shutdown_plugins()?;
         self.runtime = runtime;
         Ok(())
+    }
+
+    fn refresh_openrouter_models_best_effort(&mut self, model: &str) {
+        if resolve_provider_override(model, self.provider_override)
+            != Some(ProviderKind::OpenRouter)
+        {
+            self.openrouter_models.clear();
+            return;
+        }
+        if !has_openrouter_api_key() {
+            return;
+        }
+        if let Ok(models) = fetch_openrouter_catalog() {
+            self.openrouter_models = models;
+        }
     }
 
     fn run_turn(&mut self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -2423,7 +3075,7 @@ impl LiveCli {
             return Ok(false);
         };
 
-        let model = resolve_model_alias(&model).to_string();
+        let model = resolve_model_alias(&model);
 
         if model == self.model {
             println!(
@@ -2444,6 +3096,7 @@ impl LiveCli {
             session,
             &self.session.id,
             model.clone(),
+            resolve_provider_override(&model, self.provider_override),
             self.system_prompt.clone(),
             true,
             true,
@@ -2453,6 +3106,8 @@ impl LiveCli {
         )?;
         self.replace_runtime(runtime)?;
         self.model.clone_from(&model);
+        self.provider_override = resolve_provider_override(&model, self.provider_override);
+        self.refresh_openrouter_models_best_effort(&model);
         println!(
             "{}",
             format_model_switch_report(&previous, &model, message_count)
@@ -2490,6 +3145,7 @@ impl LiveCli {
             session,
             &self.session.id,
             self.model.clone(),
+            self.provider_override,
             self.system_prompt.clone(),
             true,
             true,
@@ -2520,6 +3176,7 @@ impl LiveCli {
             session_state.with_persistence_path(self.session.path.clone()),
             &self.session.id,
             self.model.clone(),
+            self.provider_override,
             self.system_prompt.clone(),
             true,
             true,
@@ -2562,6 +3219,7 @@ impl LiveCli {
             session,
             &handle.id,
             self.model.clone(),
+            self.provider_override,
             self.system_prompt.clone(),
             true,
             true,
@@ -2659,6 +3317,7 @@ impl LiveCli {
                     session,
                     &handle.id,
                     self.model.clone(),
+                    self.provider_override,
                     self.system_prompt.clone(),
                     true,
                     true,
@@ -2694,6 +3353,7 @@ impl LiveCli {
                     forked,
                     &handle.id,
                     self.model.clone(),
+                    self.provider_override,
                     self.system_prompt.clone(),
                     true,
                     true,
@@ -2744,6 +3404,7 @@ impl LiveCli {
             self.runtime.session().clone(),
             &self.session.id,
             self.model.clone(),
+            self.provider_override,
             self.system_prompt.clone(),
             true,
             true,
@@ -2764,6 +3425,7 @@ impl LiveCli {
             result.compacted_session,
             &self.session.id,
             self.model.clone(),
+            self.provider_override,
             self.system_prompt.clone(),
             true,
             true,
@@ -2788,6 +3450,7 @@ impl LiveCli {
             session,
             &self.session.id,
             self.model.clone(),
+            self.provider_override,
             self.system_prompt.clone(),
             enable_tools,
             false,
@@ -4256,6 +4919,7 @@ fn build_runtime(
     session: Session,
     session_id: &str,
     model: String,
+    provider_override: Option<ProviderKind>,
     system_prompt: Vec<String>,
     enable_tools: bool,
     emit_output: bool,
@@ -4268,6 +4932,7 @@ fn build_runtime(
         session,
         session_id,
         model,
+        provider_override,
         system_prompt,
         enable_tools,
         emit_output,
@@ -4284,6 +4949,7 @@ fn build_runtime_with_plugin_state(
     session: Session,
     session_id: &str,
     model: String,
+    provider_override: Option<ProviderKind>,
     system_prompt: Vec<String>,
     enable_tools: bool,
     emit_output: bool,
@@ -4303,9 +4969,10 @@ fn build_runtime_with_plugin_state(
         .map_err(std::io::Error::other)?;
     let mut runtime = ConversationRuntime::new_with_features(
         session,
-        AnthropicRuntimeClient::new(
+        ProviderRuntimeClient::new(
             session_id,
             model,
+            provider_override,
             enable_tools,
             emit_output,
             allowed_tools.clone(),
@@ -4410,9 +5077,9 @@ impl runtime::PermissionPrompter for CliPermissionPrompter {
     }
 }
 
-struct AnthropicRuntimeClient {
+struct ProviderRuntimeClient {
     runtime: tokio::runtime::Runtime,
-    client: AnthropicClient,
+    client: ProviderClient,
     model: String,
     enable_tools: bool,
     emit_output: bool,
@@ -4421,21 +5088,28 @@ struct AnthropicRuntimeClient {
     progress_reporter: Option<InternalPromptProgressReporter>,
 }
 
-impl AnthropicRuntimeClient {
+impl ProviderRuntimeClient {
     fn new(
         session_id: &str,
         model: String,
+        provider_override: Option<ProviderKind>,
         enable_tools: bool,
         emit_output: bool,
         allowed_tools: Option<AllowedToolSet>,
         tool_registry: GlobalToolRegistry,
         progress_reporter: Option<InternalPromptProgressReporter>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        let provider_kind = provider_override.unwrap_or_else(|| detect_provider_kind(&model));
+        let anthropic_auth = (provider_kind == ProviderKind::Anthropic)
+            .then(resolve_cli_auth_source)
+            .transpose()?;
+        let client =
+            ProviderClient::from_model_and_provider_kind(&model, provider_kind, anthropic_auth)?
+                .with_prompt_cache(PromptCache::new(session_id));
+
         Ok(Self {
             runtime: tokio::runtime::Runtime::new()?,
-            client: AnthropicClient::from_auth(resolve_cli_auth_source()?)
-                .with_base_url(api::read_base_url())
-                .with_prompt_cache(PromptCache::new(session_id)),
+            client,
             model,
             enable_tools,
             emit_output,
@@ -4456,7 +5130,7 @@ fn resolve_cli_auth_source() -> Result<AuthSource, Box<dyn std::error::Error>> {
     })?)
 }
 
-impl ApiClient for AnthropicRuntimeClient {
+impl ApiClient for ProviderRuntimeClient {
     #[allow(clippy::too_many_lines)]
     fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
         if let Some(progress_reporter) = &self.progress_reporter {
@@ -4674,6 +5348,7 @@ fn collect_prompt_cache_events(summary: &runtime::TurnSummary) -> Vec<serde_json
 
 fn slash_command_completion_candidates_with_sessions(
     model: &str,
+    openrouter_models: &[OpenRouterModel],
     active_session_id: Option<&str>,
     recent_session_ids: Vec<String>,
 ) -> Vec<String> {
@@ -4700,9 +5375,6 @@ fn slash_command_completion_candidates_with_sessions(
         "/export ",
         "/issue ",
         "/model ",
-        "/model opus",
-        "/model sonnet",
-        "/model haiku",
         "/permissions ",
         "/permissions read-only",
         "/permissions workspace-write",
@@ -4726,6 +5398,14 @@ fn slash_command_completion_candidates_with_sessions(
         "/skills help",
     ] {
         completions.insert(candidate.to_string());
+    }
+
+    for model_candidate in ["opus", "sonnet", "haiku"] {
+        completions.insert(format!("/model {model_candidate}"));
+    }
+
+    for openrouter_model in openrouter_models {
+        completions.insert(format!("/model {}", openrouter_model.id));
     }
 
     if !model.trim().is_empty() {
@@ -5238,7 +5918,7 @@ fn response_to_events(
     Ok(events)
 }
 
-fn push_prompt_cache_record(client: &AnthropicClient, events: &mut Vec<AssistantEvent>) {
+fn push_prompt_cache_record(client: &ProviderClient, events: &mut Vec<AssistantEvent>) {
     if let Some(record) = client.take_last_prompt_cache_record() {
         if let Some(event) = prompt_cache_record_to_runtime_event(record) {
             events.push(AssistantEvent::PromptCache(event));
@@ -5513,6 +6193,16 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
         "  --version, -V              Print version and build information locally"
     )?;
     writeln!(out)?;
+    writeln!(out, "Startup:")?;
+    writeln!(
+        out,
+        "  If no model is configured, interactive startup will ask for a provider first and then a model."
+    )?;
+    writeln!(
+        out,
+        "  Non-interactive runs require `--model` or a project/user `model` setting."
+    )?;
+    writeln!(out)?;
     writeln!(out, "Interactive slash commands:")?;
     writeln!(out, "{}", render_slash_command_help())?;
     writeln!(out)?;
@@ -5543,11 +6233,11 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     writeln!(out, "  claw --model claude-opus \"summarize this repo\"")?;
     writeln!(
         out,
-        "  claw --output-format json prompt \"explain src/main.rs\""
+        "  claw --model sonnet --output-format json prompt \"explain src/main.rs\""
     )?;
     writeln!(
         out,
-        "  claw --allowedTools read,glob \"summarize Cargo.toml\""
+        "  claw --model sonnet --allowedTools read,glob \"summarize Cargo.toml\""
     )?;
     writeln!(out, "  claw --resume {LATEST_SESSION_REFERENCE}")?;
     writeln!(
@@ -5570,23 +6260,26 @@ fn print_help() {
 mod tests {
     use super::{
         build_runtime_plugin_state_with_loader, build_runtime_with_plugin_state,
-        create_managed_session_handle, describe_tool_progress, filter_tool_specs,
-        format_bughunter_report, format_commit_preflight_report, format_commit_skipped_report,
-        format_compact_report, format_cost_report, format_internal_prompt_progress_line,
-        format_issue_report, format_model_report, format_model_switch_report,
-        format_permissions_report, format_permissions_switch_report, format_pr_report,
-        format_resume_report, format_status_report, format_tool_call_start, format_tool_result,
-        format_ultraplan_report, format_unknown_slash_command,
-        format_unknown_slash_command_message, normalize_permission_mode, parse_args,
-        parse_git_status_branch, parse_git_status_metadata_for, parse_git_workspace_summary,
-        permission_policy, print_help_to, push_output_block, render_config_report,
+        clamp_openrouter_page, create_managed_session_handle, describe_tool_progress,
+        filter_tool_specs, format_bughunter_report, format_commit_preflight_report,
+        format_commit_skipped_report, format_compact_report, format_cost_report,
+        format_internal_prompt_progress_line, format_issue_report, format_model_report,
+        format_model_switch_report, format_permissions_report, format_permissions_switch_report,
+        format_pr_report, format_resume_report, format_status_report, format_tool_call_start,
+        format_tool_result, format_ultraplan_report, format_unknown_slash_command,
+        format_unknown_slash_command_message, normalize_permission_mode, openrouter_page_count,
+        openrouter_page_model_indices, parse_args, parse_git_status_branch,
+        parse_git_status_metadata_for, parse_git_workspace_summary, permission_policy,
+        print_help_to, provider_from_startup_token, push_output_block, render_config_report,
         render_diff_report, render_diff_report_for, render_memory_report, render_repl_help,
-        render_resume_usage, resolve_model_alias, resolve_session_reference, response_to_events,
-        resume_supported_slash_commands, run_resume_command,
+        render_resume_usage, resolve_effective_model, resolve_model_alias,
+        resolve_preselected_startup_provider, resolve_provider_override, resolve_session_reference,
+        response_to_events, resume_supported_slash_commands, run_resume_command,
         slash_command_completion_candidates_with_sessions, status_context, validate_no_args,
         write_mcp_server_fixture, CliAction, CliOutputFormat, CliToolExecutor, GitWorkspaceSummary,
-        InternalPromptProgressEvent, InternalPromptProgressState, LiveCli, SlashCommand,
-        StatusUsage, DEFAULT_MODEL,
+        InternalPromptProgressEvent, InternalPromptProgressState, LiveCli, ModelSource,
+        OpenRouterModel, ProviderKind, SlashCommand, StatusUsage, DEFAULT_MODEL,
+        UNCONFIGURED_MODEL_LABEL,
     };
     use api::{MessageResponse, OutputContentBlock, Usage};
     use plugins::{
@@ -5597,6 +6290,7 @@ mod tests {
         PermissionMode, Session, ToolExecutor,
     };
     use serde_json::json;
+    use std::env;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::Command;
@@ -5714,6 +6408,7 @@ mod tests {
             parse_args(&[]).expect("args should parse"),
             CliAction::Repl {
                 model: DEFAULT_MODEL.to_string(),
+                model_source: ModelSource::Default,
                 allowed_tools: None,
                 permission_mode: PermissionMode::DangerFullAccess,
             }
@@ -5802,6 +6497,7 @@ mod tests {
             CliAction::Prompt {
                 prompt: "hello world".to_string(),
                 model: DEFAULT_MODEL.to_string(),
+                model_source: ModelSource::Default,
                 output_format: CliOutputFormat::Text,
                 allowed_tools: None,
                 permission_mode: PermissionMode::DangerFullAccess,
@@ -5825,6 +6521,7 @@ mod tests {
             CliAction::Prompt {
                 prompt: "explain this".to_string(),
                 model: "claude-opus".to_string(),
+                model_source: ModelSource::Cli,
                 output_format: CliOutputFormat::Json,
                 allowed_tools: None,
                 permission_mode: PermissionMode::DangerFullAccess,
@@ -5847,6 +6544,7 @@ mod tests {
             CliAction::Prompt {
                 prompt: "explain this".to_string(),
                 model: "claude-opus-4-6".to_string(),
+                model_source: ModelSource::Cli,
                 output_format: CliOutputFormat::Text,
                 allowed_tools: None,
                 permission_mode: PermissionMode::DangerFullAccess,
@@ -5860,6 +6558,117 @@ mod tests {
         assert_eq!(resolve_model_alias("sonnet"), "claude-sonnet-4-6");
         assert_eq!(resolve_model_alias("haiku"), "claude-haiku-4-5-20251213");
         assert_eq!(resolve_model_alias("claude-opus"), "claude-opus");
+    }
+
+    #[test]
+    fn resolve_provider_override_preserves_selected_provider_for_ambiguous_models() {
+        assert_eq!(
+            resolve_provider_override("gpt-5", Some(ProviderKind::OpenAi)),
+            Some(ProviderKind::OpenAi)
+        );
+        assert_eq!(
+            resolve_provider_override("claude-sonnet-4-6", Some(ProviderKind::OpenAi)),
+            Some(ProviderKind::Anthropic)
+        );
+        assert_eq!(
+            resolve_provider_override("openai/gpt-4o", Some(ProviderKind::OpenAi)),
+            Some(ProviderKind::OpenRouter)
+        );
+    }
+
+    #[test]
+    fn parses_startup_provider_override_tokens() {
+        assert_eq!(
+            provider_from_startup_token("openrouter"),
+            Some(ProviderKind::OpenRouter)
+        );
+        assert_eq!(
+            provider_from_startup_token("OpenAI"),
+            Some(ProviderKind::OpenAi)
+        );
+        assert_eq!(provider_from_startup_token("x.ai"), Some(ProviderKind::Xai));
+        assert_eq!(provider_from_startup_token("unknown"), None);
+    }
+
+    #[test]
+    fn preselects_single_or_requested_startup_provider_without_prompting() {
+        assert_eq!(
+            resolve_preselected_startup_provider(&[ProviderKind::OpenRouter], None),
+            Ok(Some(ProviderKind::OpenRouter))
+        );
+        assert_eq!(
+            resolve_preselected_startup_provider(
+                &[ProviderKind::Anthropic, ProviderKind::OpenRouter],
+                Some(ProviderKind::OpenRouter)
+            ),
+            Ok(Some(ProviderKind::OpenRouter))
+        );
+        assert_eq!(
+            resolve_preselected_startup_provider(
+                &[ProviderKind::Anthropic, ProviderKind::OpenRouter],
+                None
+            ),
+            Ok(None)
+        );
+        assert!(resolve_preselected_startup_provider(
+            &[ProviderKind::Anthropic],
+            Some(ProviderKind::OpenRouter)
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn openrouter_pagination_counts_and_clamps_pages() {
+        assert_eq!(openrouter_page_count(0), 1);
+        assert_eq!(openrouter_page_count(1), 1);
+        assert_eq!(openrouter_page_count(20), 1);
+        assert_eq!(openrouter_page_count(21), 2);
+        assert_eq!(clamp_openrouter_page(99, 21), 1);
+    }
+
+    #[test]
+    fn openrouter_pagination_returns_only_current_page_entries() {
+        let visible = (0..45).collect::<Vec<_>>();
+
+        assert_eq!(
+            openrouter_page_model_indices(&visible, 0),
+            &(0..20).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            openrouter_page_model_indices(&visible, 1),
+            &(20..40).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            openrouter_page_model_indices(&visible, 2),
+            &(40..45).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn resolve_effective_model_reports_unconfigured_when_no_project_model_is_set() {
+        let _env_guard = env_lock();
+        let _cwd_guard = cwd_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let workspace = temp_dir();
+        let config_home = workspace.join("config-home");
+        fs::create_dir_all(&workspace).expect("workspace should exist");
+        fs::create_dir_all(&config_home).expect("config home should exist");
+
+        let original_config_home = env::var("CLAW_CONFIG_HOME").ok();
+        env::set_var("CLAW_CONFIG_HOME", &config_home);
+
+        let resolved = with_current_dir(&workspace, || {
+            resolve_effective_model(DEFAULT_MODEL, ModelSource::Default)
+        });
+
+        match original_config_home {
+            Some(value) => env::set_var("CLAW_CONFIG_HOME", value),
+            None => env::remove_var("CLAW_CONFIG_HOME"),
+        }
+        fs::remove_dir_all(workspace).expect("workspace should clean up");
+
+        assert_eq!(resolved, UNCONFIGURED_MODEL_LABEL);
     }
 
     #[test]
@@ -5881,6 +6690,7 @@ mod tests {
             parse_args(&args).expect("args should parse"),
             CliAction::Repl {
                 model: DEFAULT_MODEL.to_string(),
+                model_source: ModelSource::Default,
                 allowed_tools: None,
                 permission_mode: PermissionMode::ReadOnly,
             }
@@ -5900,6 +6710,7 @@ mod tests {
             parse_args(&args).expect("args should parse"),
             CliAction::Repl {
                 model: DEFAULT_MODEL.to_string(),
+                model_source: ModelSource::Default,
                 allowed_tools: Some(
                     ["glob_search", "read_file", "write_file"]
                         .into_iter()
@@ -5987,6 +6798,7 @@ mod tests {
             parse_args(&["status".to_string()]).expect("status should parse"),
             CliAction::Status {
                 model: DEFAULT_MODEL.to_string(),
+                model_source: ModelSource::Default,
                 permission_mode: PermissionMode::DangerFullAccess,
             }
         );
@@ -6013,6 +6825,7 @@ mod tests {
             CliAction::Prompt {
                 prompt: "help me debug".to_string(),
                 model: DEFAULT_MODEL.to_string(),
+                model_source: ModelSource::Default,
                 output_format: CliOutputFormat::Text,
                 allowed_tools: None,
                 permission_mode: PermissionMode::DangerFullAccess,
@@ -6272,11 +7085,31 @@ mod tests {
     fn completion_candidates_include_workflow_shortcuts_and_dynamic_sessions() {
         let completions = slash_command_completion_candidates_with_sessions(
             "sonnet",
+            &[OpenRouterModel {
+                id: "openai/gpt-4o".to_string(),
+                canonical_slug: "openai/gpt-4o".to_string(),
+                name: "GPT-4o".to_string(),
+                description: "flagship".to_string(),
+                pricing: api::OpenRouterPricing {
+                    prompt: "0.000005".to_string(),
+                    completion: "0.000015".to_string(),
+                    request: "0".to_string(),
+                    image: "0".to_string(),
+                },
+                context_length: 128_000,
+                top_provider: api::OpenRouterTopProvider {
+                    context_length: Some(128_000),
+                    max_completion_tokens: Some(16_384),
+                    is_moderated: Some(true),
+                },
+                supported_parameters: vec!["temperature".to_string()],
+            }],
             Some("session-current"),
             vec!["session-old".to_string()],
         );
 
         assert!(completions.contains(&"/model claude-sonnet-4-6".to_string()));
+        assert!(completions.contains(&"/model openai/gpt-4o".to_string()));
         assert!(completions.contains(&"/permissions workspace-write".to_string()));
         assert!(completions.contains(&"/session list".to_string()));
         assert!(completions.contains(&"/session switch session-current".to_string()));
@@ -6296,9 +7129,11 @@ mod tests {
         let banner = with_current_dir(&root, || {
             LiveCli::new(
                 "claude-sonnet-4-6".to_string(),
+                ModelSource::Cli,
                 true,
                 None,
                 PermissionMode::DangerFullAccess,
+                true,
             )
             .expect("cli should initialize")
             .startup_banner()
@@ -7427,6 +8262,7 @@ UU conflicted.rs",
             Session::new(),
             "runtime-plugin-lifecycle",
             DEFAULT_MODEL.to_string(),
+            None,
             vec!["test system prompt".to_string()],
             true,
             false,

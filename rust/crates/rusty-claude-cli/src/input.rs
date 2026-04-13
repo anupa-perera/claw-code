@@ -68,6 +68,7 @@ impl Completer for SlashCommandHelper {
         let matches = self
             .completions
             .iter()
+            .filter(|candidate| !candidate.starts_with("/model ") || prefix.starts_with("/model "))
             .filter(|candidate| candidate.starts_with(prefix))
             .map(|candidate| Pair {
                 display: candidate.clone(),
@@ -283,6 +284,28 @@ mod tests {
                 .map(|candidate| candidate.replacement)
                 .collect::<Vec<_>>(),
             vec!["/model opus".to_string()]
+        );
+    }
+
+    #[test]
+    fn does_not_dump_model_variants_before_model_argument_completion() {
+        let helper = SlashCommandHelper::new(vec![
+            "/model".to_string(),
+            "/model openai/gpt-4o".to_string(),
+            "/memory".to_string(),
+        ]);
+        let history = DefaultHistory::new();
+        let ctx = Context::new(&history);
+        let (_, matches) = helper
+            .complete("/m", 2, &ctx)
+            .expect("completion should work");
+
+        assert_eq!(
+            matches
+                .into_iter()
+                .map(|candidate| candidate.replacement)
+                .collect::<Vec<_>>(),
+            vec!["/memory".to_string(), "/model".to_string()]
         );
     }
 

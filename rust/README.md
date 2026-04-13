@@ -13,10 +13,36 @@ cargo build --release
 ./target/release/claw
 
 # One-shot prompt
-./target/release/claw prompt "explain this codebase"
+./target/release/claw --model sonnet prompt "explain this codebase"
 
 # With specific model
 ./target/release/claw --model sonnet prompt "fix the bug in main.rs"
+```
+
+### Simplest Windows Launcher
+
+If you are using this checkout on Windows, run the launcher from the repository root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\claw-code.ps1
+```
+
+On first run it will:
+
+1. Ask which provider you want for this session.
+2. Reuse a saved API key if one already exists, or prompt you to paste one.
+3. Offer Claude browser login when you choose Anthropic.
+4. Start the Rust CLI so you can pick the model next.
+
+The launcher stores user-level provider credentials under `~/.claw-code/` and keeps the model
+selection interactive by clearing any saved user-level default model before launch. Workspace
+`.claw/settings.json` still wins if that project pins a model on purpose.
+
+If you later add `claw-code` to your shell profile or package it as a real installable command,
+the same flow can be started with just:
+
+```powershell
+claw-code
 ```
 
 ## Configuration
@@ -27,6 +53,44 @@ Set your API credentials:
 export ANTHROPIC_API_KEY="sk-ant-..."
 # Or use a proxy
 export ANTHROPIC_BASE_URL="https://your-proxy.com"
+
+# Optional alternative providers
+export OPENAI_API_KEY="sk-..."
+export OPENROUTER_API_KEY="sk-or-..."
+export XAI_API_KEY="xai-..."
+```
+
+OpenRouter also supports a custom gateway:
+
+```bash
+export OPENROUTER_BASE_URL="https://openrouter.ai/api/v1"
+```
+
+If no `model` is configured yet, a fresh interactive REPL launch will ask you to choose a provider
+first and then a model. For non-interactive runs, pass `--model <model-id>` or set `"model"` in
+your `.claw/settings.json`.
+
+### First-Run OpenRouter Onboarding
+
+If you are testing from this checkout on Windows, the cleanest path is:
+
+```powershell
+cd <path-to-claw-code>
+powershell -ExecutionPolicy Bypass -File .\claw-code.ps1
+```
+
+At the picker:
+
+1. Choose `OpenRouter`.
+2. Type a provider or family name like `openai`, `anthropic`, `google`, `deepseek`, or `qwen` to narrow the list.
+3. Use `n` and `p` to move between pages.
+4. Type `all` to reset the filter back to the full catalog.
+5. Paste an exact model id if you already know it, for example `openai/gpt-4o`.
+
+If you prefer the older provider-specific helper, this still works too:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start-openrouter.ps1
 ```
 
 Or authenticate via OAuth:
@@ -75,6 +139,7 @@ Primary artifacts:
 | Feature | Status |
 |---------|--------|
 | Anthropic API + streaming | ✅ |
+| OpenRouter API + model discovery | ✅ |
 | OAuth login/logout | ✅ |
 | Interactive REPL (rustyline) | ✅ |
 | Tool system (bash, read, write, edit, grep, glob) | ✅ |
@@ -180,7 +245,7 @@ rust/
 - **~20K lines** of Rust
 - **7 crates** in workspace
 - **Binary name:** `claw`
-- **Default model:** `claude-opus-4-6`
+- **Startup model:** interactive provider/model prompt when unset
 - **Default permissions:** `danger-full-access`
 
 ## License

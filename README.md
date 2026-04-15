@@ -8,15 +8,34 @@ A maintained fork of the Claw Code agent harness with an installable Rust CLI on
 
 The active product in this repo is the Rust workspace in [`rust/`](./rust). The main outcome of this fork is that the CLI can now be installed globally and used from any project as `claw-code`, while still keeping `claw` as a compatibility alias.
 
+The biggest end-user contribution of this fork is making OpenRouter a first-class path for using the CLI with one API key across many model providers, including lower-cost and free-tier model options when OpenRouter makes them available.
+
 ## What This Fork Achieves
 
+- makes OpenRouter the most important new provider path in this fork
 - packages the Rust CLI as a real installable command
 - standardizes the public command name as `claw-code`
 - keeps `claw` available as a compatibility alias
+- makes OpenRouter a first-class provider for lower-cost and free-tier model access
 - aligns user and project state around `.claw`
 - supports running from an installed binary instead of requiring a repo checkout
 - keeps the Windows launcher and onboarding flow working with the packaged CLI
 - preserves parity and test coverage around sessions, commands, and bundled plugins
+
+## Biggest Addition: OpenRouter
+
+The biggest practical addition in this fork is the OpenRouter path.
+
+With `OPENROUTER_API_KEY` or `claw-code login --provider openrouter`, you can use the CLI without locking yourself into a single premium provider account. That matters if you are:
+
+- a student trying to learn and build without burning through expensive tokens
+- a low-budget indie developer shipping with tight cost limits
+- a team working in pricing tiers and wanting cheaper models for everyday tasks
+- someone frustrated by strict token limits or account gating on paid-first providers
+
+OpenRouter is useful here because one key can expose many model families through one provider surface, and it often includes free-tier models or very low-cost models alongside paid options. Availability and rate limits can change on the OpenRouter side, so it is best to think of this as access to free-tier and budget-friendly options when available, not as a guarantee that every model is always free.
+
+Packaging the Rust CLI for global install is a big part of this fork too, but that install story mainly matters because it makes the OpenRouter workflow usable from any project without needing a repo checkout or a premium-provider-first setup.
 
 ## Install
 
@@ -68,6 +87,15 @@ If you want a direct login path, these are also supported:
 claw-code login --provider anthropic --auth oauth
 claw-code login --provider openrouter
 ```
+
+If you want the most budget-friendly path, OpenRouter is usually the best starting point:
+
+```bash
+export OPENROUTER_API_KEY="sk-or-..."
+claw-code
+```
+
+Then choose OpenRouter on startup and pick a free-tier or lower-cost model from the catalog.
 
 Or use environment variables instead:
 

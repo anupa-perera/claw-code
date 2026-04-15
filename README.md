@@ -5,11 +5,11 @@
 </p>
 
 <p align="center">
-  <a href="https://star-history.com/#ultraworkers/claw-code&Date">
+  <a href="https://star-history.com/#anupa-perera/claw-code&Date">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ultraworkers/claw-code&type=Date&theme=dark" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=ultraworkers/claw-code&type=Date" />
-      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=ultraworkers/claw-code&type=Date" width="600" />
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=anupa-perera/claw-code&type=Date&theme=dark" />
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=anupa-perera/claw-code&type=Date" />
+      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=anupa-perera/claw-code&type=Date" width="600" />
     </picture>
   </a>
 </p>
@@ -34,7 +34,7 @@
 > The active Rust workspace now lives in [`rust/`](./rust). Start with [`USAGE.md`](./USAGE.md) for build, auth, CLI, session, and parity-harness workflows, then use [`rust/README.md`](./rust/README.md) for crate-level details.
 >
 > Install the global CLI from `main` with Cargo:
-> `cargo install --git https://github.com/ultraworkers/claw-code claw-code --locked`
+> `cargo install --git https://github.com/anupa-perera/claw-code claw-code --locked`
 
 That installs the primary `claw-code` executable and the compatibility alias `claw`.
 
@@ -52,7 +52,7 @@ Cargo's default global bin directory is:
 
 To update an existing global install:
 
-`cargo install --git https://github.com/ultraworkers/claw-code claw-code --locked --force`
+`cargo install --git https://github.com/anupa-perera/claw-code claw-code --locked --force`
 
 > Want the bigger idea behind this repo? Read [`PHILOSOPHY.md`](./PHILOSOPHY.md) and Sigrid Jin's public explanation: https://x.com/realsigridjin/status/2039472968624185713
 

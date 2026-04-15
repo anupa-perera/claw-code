@@ -7,7 +7,7 @@ This guide covers the current Rust workspace under `rust/` and the `claw-code` C
 Install from `main`:
 
 ```bash
-cargo install --git https://github.com/ultraworkers/claw-code claw-code --locked
+cargo install --git https://github.com/anupa-perera/claw-code claw-code --locked
 ```
 
 That installs `claw-code` as the primary executable and `claw` as a compatibility alias.
@@ -20,7 +20,7 @@ If the command is not found after install, add Cargo's bin directory to `PATH`:
 To update an existing global install:
 
 ```bash
-cargo install --git https://github.com/ultraworkers/claw-code claw-code --locked --force
+cargo install --git https://github.com/anupa-perera/claw-code claw-code --locked --force
 ```
 
 Then run the CLI from any project:

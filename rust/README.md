@@ -9,7 +9,7 @@ For a task-oriented guide with copy/paste examples, see [`../USAGE.md`](../USAGE
 Install the CLI globally from `main` with Cargo:
 
 ```bash
-cargo install --git https://github.com/ultraworkers/claw-code claw-code --locked
+cargo install --git https://github.com/anupa-perera/claw-code claw-code --locked
 ```
 
 After installation, start it from any project with:
@@ -46,7 +46,7 @@ claw-code
 Update an existing install with:
 
 ```bash
-cargo install --git https://github.com/ultraworkers/claw-code claw-code --locked --force
+cargo install --git https://github.com/anupa-perera/claw-code claw-code --locked --force
 ```
 
 Or use environment variables instead:

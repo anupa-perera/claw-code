@@ -620,7 +620,7 @@ function Ensure-ProviderCredential {
             if ($choice -eq "2") {
                 Write-Host ""
                 Write-Host "Opening the Claude login flow in your browser..."
-                Invoke-RustCli -Args @("login")
+                Invoke-RustCli -Args @("login", "--provider", "anthropic", "--auth", "oauth")
                 if (-not (Test-SavedAnthropicOAuth)) {
                     throw "Claude OAuth login did not produce saved credentials."
                 }

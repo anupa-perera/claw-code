@@ -64,7 +64,7 @@ impl OpenRouterCatalogClient {
     }
 
     pub fn from_env() -> Result<Self, ApiError> {
-        let Some(api_key) = read_env_non_empty("OPENROUTER_API_KEY")? else {
+        let Some(api_key) = openai_compat::read_api_key_for_env_var("OPENROUTER_API_KEY")? else {
             return Err(ApiError::missing_credentials(
                 "OpenRouter",
                 &["OPENROUTER_API_KEY"],
@@ -111,14 +111,6 @@ fn models_user_endpoint(base_url: &str) -> String {
         .or_else(|| trimmed.strip_suffix("/models"))
         .unwrap_or(trimmed);
     format!("{root}/models/user")
-}
-
-fn read_env_non_empty(key: &str) -> Result<Option<String>, ApiError> {
-    match std::env::var(key) {
-        Ok(value) if !value.is_empty() => Ok(Some(value)),
-        Ok(_) | Err(std::env::VarError::NotPresent) => Ok(None),
-        Err(error) => Err(ApiError::from(error)),
-    }
 }
 
 async fn expect_success(response: reqwest::Response) -> Result<reqwest::Response, ApiError> {

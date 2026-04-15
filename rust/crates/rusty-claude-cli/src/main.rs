@@ -41,15 +41,16 @@ use compat_harness::{extract_manifest, UpstreamPaths};
 use init::initialize_repo;
 use plugins::{PluginHooks, PluginManager, PluginManagerConfig, PluginRegistry};
 use render::{MarkdownStreamState, Spinner, TerminalRenderer};
+use rpassword::prompt_password;
 use runtime::{
-    clear_oauth_credentials, format_usd, generate_pkce_pair, generate_state, load_system_prompt,
-    parse_oauth_callback_request_target, pricing_for_model, resolve_sandbox_status,
-    save_oauth_credentials, ApiClient, ApiRequest, AssistantEvent, CompactionConfig, ConfigLoader,
-    ConfigSource, ContentBlock, ConversationMessage, ConversationRuntime, McpServerManager,
-    McpTool, MessageRole, ModelPricing, OAuthAuthorizationRequest, OAuthConfig,
-    OAuthTokenExchangeRequest, PermissionMode, PermissionPolicy, ProjectContext, PromptCacheEvent,
-    ResolvedPermissionMode, RuntimeError, Session, TokenUsage, ToolError, ToolExecutor,
-    UsageTracker,
+    clear_oauth_credentials, clear_saved_api_key, format_usd, generate_pkce_pair, generate_state,
+    load_saved_api_key, load_system_prompt, parse_oauth_callback_request_target, pricing_for_model,
+    resolve_sandbox_status, save_api_key, save_oauth_credentials, ApiClient, ApiRequest,
+    AssistantEvent, CompactionConfig, ConfigLoader, ConfigSource, ContentBlock,
+    ConversationMessage, ConversationRuntime, McpServerManager, McpTool, MessageRole, ModelPricing,
+    OAuthAuthorizationRequest, OAuthConfig, OAuthTokenExchangeRequest, PermissionMode,
+    PermissionPolicy, ProjectContext, PromptCacheEvent, ResolvedPermissionMode, RuntimeError,
+    SavedApiKeyProvider, Session, TokenUsage, ToolError, ToolExecutor, UsageTracker,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -142,7 +143,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             false,
         )?
         .run_turn_with_output(&prompt, output_format)?,
-        CliAction::Login => run_login()?,
+        CliAction::Login { provider, auth } => run_login(provider, auth)?,
         CliAction::Logout => run_logout()?,
         CliAction::Init => run_init()?,
         CliAction::BranchDelete => print_branch_delete_report()?,
@@ -195,7 +196,10 @@ enum CliAction {
         allowed_tools: Option<AllowedToolSet>,
         permission_mode: PermissionMode,
     },
-    Login,
+    Login {
+        provider: Option<ProviderKind>,
+        auth: Option<LoginAuthMode>,
+    },
     Logout,
     Init,
     BranchDelete,
@@ -216,6 +220,12 @@ enum CliOutputFormat {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LoginAuthMode {
+    ApiKey,
+    OAuth,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ModelSource {
     Default,
     Cli,
@@ -228,6 +238,18 @@ impl CliOutputFormat {
             "json" => Ok(Self::Json),
             other => Err(format!(
                 "unsupported value for --output-format: {other} (expected text or json)"
+            )),
+        }
+    }
+}
+
+impl LoginAuthMode {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "api" | "api-key" | "apikey" | "key" => Ok(Self::ApiKey),
+            "oauth" | "browser" => Ok(Self::OAuth),
+            other => Err(format!(
+                "unsupported value for --auth: {other} (expected api-key or oauth)"
             )),
         }
     }
@@ -392,7 +414,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
         }),
         "system-prompt" => parse_system_prompt_args(&rest[1..]),
         "hook" => parse_hook_args(&rest[1..]),
-        "login" => Ok(CliAction::Login),
+        "login" => parse_login_args(&rest[1..]),
         "logout" => Ok(CliAction::Logout),
         "init" => Ok(CliAction::Init),
         "branch" => parse_branch_args(&rest[1..]),
@@ -443,6 +465,67 @@ fn parse_single_word_command_alias(
         "sandbox" => Some(Ok(CliAction::Sandbox)),
         other => bare_slash_command_guidance(other).map(Err),
     }
+}
+
+fn parse_login_args(args: &[String]) -> Result<CliAction, String> {
+    let mut provider = None;
+    let mut auth = None;
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--provider" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "missing value for --provider".to_string())?;
+                provider = Some(parse_login_provider_arg(value)?);
+                index += 2;
+            }
+            flag if flag.starts_with("--provider=") => {
+                provider = Some(parse_login_provider_arg(&flag[11..])?);
+                index += 1;
+            }
+            "--auth" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "missing value for --auth".to_string())?;
+                auth = Some(LoginAuthMode::parse(value)?);
+                index += 2;
+            }
+            flag if flag.starts_with("--auth=") => {
+                auth = Some(LoginAuthMode::parse(&flag[7..])?);
+                index += 1;
+            }
+            other if other.starts_with('-') => return Err(format_unknown_option(other)),
+            other => {
+                return Err(format!(
+                    "login does not accept positional arguments: {other}\nRun `claw-code --help` for usage."
+                ))
+            }
+        }
+    }
+
+    if matches!(auth, Some(LoginAuthMode::OAuth)) {
+        provider = match provider {
+            Some(ProviderKind::Anthropic) | None => Some(ProviderKind::Anthropic),
+            Some(other) => {
+                return Err(format!(
+                    "OAuth login is only available for Anthropic, but {} was requested.",
+                    provider_display_name(other)
+                ))
+            }
+        };
+    }
+
+    Ok(CliAction::Login { provider, auth })
+}
+
+fn parse_login_provider_arg(value: &str) -> Result<ProviderKind, String> {
+    provider_from_startup_token(value).ok_or_else(|| {
+        format!(
+            "unsupported provider for login: {value} (expected anthropic, openai, openrouter, or xai)"
+        )
+    })
 }
 
 fn bare_slash_command_guidance(command_name: &str) -> Option<String> {
@@ -642,10 +725,26 @@ fn has_non_empty_env_var(key: &str) -> bool {
 
 fn has_openai_api_key() -> bool {
     has_non_empty_env_var("OPENAI_API_KEY")
+        || load_saved_api_key(SavedApiKeyProvider::OpenAi)
+            .ok()
+            .flatten()
+            .is_some()
 }
 
 fn has_xai_api_key() -> bool {
     has_non_empty_env_var("XAI_API_KEY")
+        || load_saved_api_key(SavedApiKeyProvider::Xai)
+            .ok()
+            .flatten()
+            .is_some()
+}
+
+fn has_openrouter_api_key() -> bool {
+    has_non_empty_env_var("OPENROUTER_API_KEY")
+        || load_saved_api_key(SavedApiKeyProvider::OpenRouter)
+            .ok()
+            .flatten()
+            .is_some()
 }
 
 fn explicit_provider_for_model(model: &str) -> Option<ProviderKind> {
@@ -657,6 +756,89 @@ fn resolve_provider_override(
     current_override: Option<ProviderKind>,
 ) -> Option<ProviderKind> {
     explicit_provider_for_model(model).or(current_override)
+}
+
+const fn saved_api_key_provider(provider: ProviderKind) -> SavedApiKeyProvider {
+    match provider {
+        ProviderKind::Anthropic => SavedApiKeyProvider::Anthropic,
+        ProviderKind::OpenAi => SavedApiKeyProvider::OpenAi,
+        ProviderKind::OpenRouter => SavedApiKeyProvider::OpenRouter,
+        ProviderKind::Xai => SavedApiKeyProvider::Xai,
+    }
+}
+
+const fn provider_api_env_var(provider: ProviderKind) -> &'static str {
+    match provider {
+        ProviderKind::Anthropic => "ANTHROPIC_API_KEY",
+        ProviderKind::OpenAi => "OPENAI_API_KEY",
+        ProviderKind::OpenRouter => "OPENROUTER_API_KEY",
+        ProviderKind::Xai => "XAI_API_KEY",
+    }
+}
+
+fn configured_startup_provider() -> Option<ProviderKind> {
+    let cwd = env::current_dir().ok()?;
+    let config = ConfigLoader::default_for(&cwd).load().ok()?;
+    config
+        .get("startupProvider")
+        .and_then(|value| value.as_str())
+        .and_then(provider_from_startup_token)
+}
+
+fn read_json_object(path: &Path) -> io::Result<serde_json::Map<String, serde_json::Value>> {
+    match fs::read_to_string(path) {
+        Ok(contents) => {
+            if contents.trim().is_empty() {
+                return Ok(serde_json::Map::new());
+            }
+            serde_json::from_str::<serde_json::Value>(&contents)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?
+                .as_object()
+                .cloned()
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "settings file must contain a JSON object",
+                    )
+                })
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(serde_json::Map::new()),
+        Err(error) => Err(error),
+    }
+}
+
+fn write_json_object(
+    path: &Path,
+    root: &serde_json::Map<String, serde_json::Value>,
+) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let rendered = serde_json::to_string_pretty(&serde_json::Value::Object(root.clone()))
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let temp_path = path.with_extension("json.tmp");
+    fs::write(&temp_path, format!("{rendered}\n"))?;
+    fs::rename(temp_path, path)
+}
+
+fn save_startup_provider_preference(provider: ProviderKind) -> io::Result<()> {
+    let cwd = env::current_dir()?;
+    let loader = ConfigLoader::default_for(&cwd);
+    let settings_path = loader.config_home().join("settings.json");
+    let mut root = read_json_object(&settings_path)?;
+    root.insert(
+        "startupProvider".to_string(),
+        serde_json::Value::String(
+            match provider {
+                ProviderKind::Anthropic => "anthropic",
+                ProviderKind::OpenAi => "openai",
+                ProviderKind::OpenRouter => "openrouter",
+                ProviderKind::Xai => "xai",
+            }
+            .to_string(),
+        ),
+    );
+    write_json_object(&settings_path, &root)
 }
 
 fn normalize_allowed_tools(values: &[String]) -> Result<Option<AllowedToolSet>, String> {
@@ -884,6 +1066,145 @@ fn print_bootstrap_plan() {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AnthropicLoginMethod {
+    ApiKey,
+    OAuth,
+}
+
+fn prompt_for_login_provider() -> Result<ProviderKind, Box<dyn std::error::Error>> {
+    loop {
+        println!();
+        println!("Provider login");
+        println!(
+            "  1. OpenRouter ({})",
+            provider_api_env_var(ProviderKind::OpenRouter)
+        );
+        println!(
+            "  2. Anthropic ({})",
+            provider_api_env_var(ProviderKind::Anthropic)
+        );
+        println!(
+            "  3. OpenAI ({})",
+            provider_api_env_var(ProviderKind::OpenAi)
+        );
+        println!("  4. xAI ({})", provider_api_env_var(ProviderKind::Xai));
+        println!();
+        print!("Choose a provider by number or 'q' to cancel: ");
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        let read = io::stdin().read_line(&mut input)?;
+        if read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "provider selection ended before a choice was made",
+            )
+            .into());
+        }
+
+        match input.trim().to_ascii_lowercase().as_str() {
+            "1" | "openrouter" => return Ok(ProviderKind::OpenRouter),
+            "2" | "anthropic" => return Ok(ProviderKind::Anthropic),
+            "3" | "openai" => return Ok(ProviderKind::OpenAi),
+            "4" | "xai" | "x.ai" => return Ok(ProviderKind::Xai),
+            "q" | "quit" | "exit" => {
+                return Err(
+                    io::Error::other("login cancelled before a provider was selected").into(),
+                )
+            }
+            _ => println!("That was not a valid provider selection."),
+        }
+    }
+}
+
+fn prompt_for_anthropic_login_method() -> Result<AnthropicLoginMethod, Box<dyn std::error::Error>> {
+    loop {
+        println!();
+        println!("Anthropic login");
+        println!("  1. API key");
+        println!("  2. Browser OAuth");
+        println!();
+        print!("Choose an auth method by number or 'q' to cancel: ");
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        let read = io::stdin().read_line(&mut input)?;
+        if read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Anthropic login selection ended before a choice was made",
+            )
+            .into());
+        }
+
+        match input.trim().to_ascii_lowercase().as_str() {
+            "1" | "api" | "api-key" => return Ok(AnthropicLoginMethod::ApiKey),
+            "2" | "oauth" | "browser" => return Ok(AnthropicLoginMethod::OAuth),
+            "q" | "quit" | "exit" => {
+                return Err(io::Error::other("Anthropic login cancelled").into())
+            }
+            _ => println!("That was not a valid auth choice."),
+        }
+    }
+}
+
+fn resolve_anthropic_login_method(
+    auth_override: Option<LoginAuthMode>,
+) -> Result<AnthropicLoginMethod, Box<dyn std::error::Error>> {
+    match auth_override {
+        Some(LoginAuthMode::ApiKey) => Ok(AnthropicLoginMethod::ApiKey),
+        Some(LoginAuthMode::OAuth) => Ok(AnthropicLoginMethod::OAuth),
+        None => prompt_for_anthropic_login_method(),
+    }
+}
+
+fn prompt_for_api_key(provider: ProviderKind) -> Result<String, Box<dyn std::error::Error>> {
+    let api_key = prompt_password(format!(
+        "Paste your {} (input hidden): ",
+        provider_api_env_var(provider)
+    ))?;
+    let api_key = api_key.trim().to_string();
+    if api_key.is_empty() {
+        return Err(
+            io::Error::new(io::ErrorKind::InvalidInput, "api key must not be empty").into(),
+        );
+    }
+    Ok(api_key)
+}
+
+fn save_provider_api_key_flow(provider: ProviderKind) -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = prompt_for_api_key(provider)?;
+    save_api_key(saved_api_key_provider(provider), &api_key)?;
+    if provider == ProviderKind::Anthropic {
+        clear_oauth_credentials()?;
+    }
+    println!(
+        "Saved {} credentials under ~/.claw/provider-auth.json.",
+        provider_display_name(provider)
+    );
+    Ok(())
+}
+
+fn prompt_to_remember_startup_provider(
+    provider: ProviderKind,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    println!();
+    print!(
+        "Use {} as the default startup provider when no model is configured? [y/N]: ",
+        provider_display_name(provider)
+    );
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    let read = io::stdin().read_line(&mut input)?;
+    if read == 0 {
+        return Ok(false);
+    }
+    let normalized = input.trim().to_ascii_lowercase();
+    Ok(matches!(normalized.as_str(), "y" | "yes"))
+}
+
 fn default_oauth_config() -> OAuthConfig {
     OAuthConfig {
         client_id: String::from("9d1c250a-e61b-44d9-88ed-5944d1962f5e"),
@@ -899,7 +1220,44 @@ fn default_oauth_config() -> OAuthConfig {
     }
 }
 
-fn run_login() -> Result<(), Box<dyn std::error::Error>> {
+fn run_login(
+    provider_override: Option<ProviderKind>,
+    auth_override: Option<LoginAuthMode>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let provider = match provider_override {
+        Some(provider) => provider,
+        None => prompt_for_login_provider()?,
+    };
+    match provider {
+        ProviderKind::Anthropic => match resolve_anthropic_login_method(auth_override)? {
+            AnthropicLoginMethod::ApiKey => save_provider_api_key_flow(provider)?,
+            AnthropicLoginMethod::OAuth => run_anthropic_oauth_login()?,
+        },
+        ProviderKind::OpenAi | ProviderKind::OpenRouter | ProviderKind::Xai => {
+            if matches!(auth_override, Some(LoginAuthMode::OAuth)) {
+                return Err(io::Error::other(format!(
+                    "{} only supports API key login.",
+                    provider_display_name(provider)
+                ))
+                .into());
+            }
+            save_provider_api_key_flow(provider)?
+        }
+    }
+
+    if prompt_to_remember_startup_provider(provider)? {
+        save_startup_provider_preference(provider)?;
+        println!(
+            "Saved {} as the default startup provider for future interactive launches.",
+            provider_display_name(provider)
+        );
+    }
+
+    println!("{} login complete.", provider_display_name(provider));
+    Ok(())
+}
+
+fn run_anthropic_oauth_login() -> Result<(), Box<dyn std::error::Error>> {
     let cwd = env::current_dir()?;
     let config = ConfigLoader::default_for(&cwd).load()?;
     let default_oauth = default_oauth_config();
@@ -914,9 +1272,9 @@ fn run_login() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Starting Claude OAuth login...");
     println!("Listening for callback on {redirect_uri}");
+    println!("If your browser does not open automatically, use this URL:\n{authorize_url}");
     if let Err(error) = open_browser(&authorize_url) {
         eprintln!("warning: failed to open browser automatically: {error}");
-        println!("Open this URL manually:\n{authorize_url}");
     }
 
     let callback = wait_for_oauth_callback(callback_port)?;
@@ -947,26 +1305,42 @@ fn run_login() -> Result<(), Box<dyn std::error::Error>> {
         expires_at: token_set.expires_at,
         scopes: token_set.scopes,
     })?;
-    println!("Claude OAuth login complete.");
+    clear_saved_api_key(SavedApiKeyProvider::Anthropic)?;
+    println!("Anthropic OAuth login complete.");
     Ok(())
 }
 
 fn run_logout() -> Result<(), Box<dyn std::error::Error>> {
     clear_oauth_credentials()?;
-    println!("Claude OAuth credentials cleared.");
+    clear_saved_api_key(SavedApiKeyProvider::Anthropic)?;
+    clear_saved_api_key(SavedApiKeyProvider::OpenAi)?;
+    clear_saved_api_key(SavedApiKeyProvider::OpenRouter)?;
+    clear_saved_api_key(SavedApiKeyProvider::Xai)?;
+    println!("Saved provider credentials cleared.");
     Ok(())
 }
 
 fn open_browser(url: &str) -> io::Result<()> {
     let commands = if cfg!(target_os = "macos") {
-        vec![("open", vec![url])]
+        vec![(String::from("open"), vec![url.to_string()])]
     } else if cfg!(target_os = "windows") {
-        vec![("cmd", vec!["/C", "start", "", url])]
+        vec![
+            (String::from("explorer"), vec![url.to_string()]),
+            (
+                String::from("cmd"),
+                vec![
+                    String::from("/C"),
+                    String::from("start"),
+                    String::from(""),
+                    url.to_string(),
+                ],
+            ),
+        ]
     } else {
-        vec![("xdg-open", vec![url])]
+        vec![(String::from("xdg-open"), vec![url.to_string()])]
     };
     for (program, args) in commands {
-        match Command::new(program).args(args).spawn() {
+        match Command::new(&program).args(&args).spawn() {
             Ok(_) => return Ok(()),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
@@ -2366,10 +2740,6 @@ impl HookAbortMonitor {
     }
 }
 
-fn has_openrouter_api_key() -> bool {
-    has_non_empty_env_var("OPENROUTER_API_KEY")
-}
-
 fn fetch_openrouter_catalog() -> Result<Vec<OpenRouterModel>, Box<dyn std::error::Error>> {
     let client = OpenRouterCatalogClient::from_env()?;
     let runtime = tokio::runtime::Runtime::new()?;
@@ -2404,7 +2774,7 @@ fn provider_from_startup_token(value: &str) -> Option<ProviderKind> {
     match value.trim().to_ascii_lowercase().as_str() {
         "anthropic" => Some(ProviderKind::Anthropic),
         "openai" => Some(ProviderKind::OpenAi),
-        "openrouter" => Some(ProviderKind::OpenRouter),
+        "openrouter" | "open-router" | "open_router" => Some(ProviderKind::OpenRouter),
         "xai" | "x.ai" => Some(ProviderKind::Xai),
         _ => None,
     }
@@ -2446,9 +2816,9 @@ const fn provider_display_name(provider: ProviderKind) -> &'static str {
 const fn provider_credential_hint(provider: ProviderKind) -> &'static str {
     match provider {
         ProviderKind::Anthropic => "ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or `claw-code login`",
-        ProviderKind::OpenAi => "OPENAI_API_KEY",
-        ProviderKind::OpenRouter => "OPENROUTER_API_KEY",
-        ProviderKind::Xai => "XAI_API_KEY",
+        ProviderKind::OpenAi => "OPENAI_API_KEY or `claw-code login`",
+        ProviderKind::OpenRouter => "OPENROUTER_API_KEY or `claw-code login`",
+        ProviderKind::Xai => "XAI_API_KEY or `claw-code login`",
     }
 }
 
@@ -2456,7 +2826,7 @@ fn prompt_for_startup_provider() -> Result<ProviderKind, Box<dyn std::error::Err
     let available = available_startup_providers();
     if available.is_empty() {
         return Err(io::Error::other(
-            "No provider credentials were found. Configure ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, OPENAI_API_KEY, OPENROUTER_API_KEY, or XAI_API_KEY before starting a fresh interactive session.",
+            "No provider credentials were found. Configure ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, OPENAI_API_KEY, OPENROUTER_API_KEY, or XAI_API_KEY, or run `claw-code login` before starting a fresh interactive session.",
         )
         .into());
     }
@@ -2468,6 +2838,30 @@ fn prompt_for_startup_provider() -> Result<ProviderKind, Box<dyn std::error::Err
         println!();
         println!(
             "Provider setup\n  No model is configured for this workspace yet.\n  Provider         {} (preselected for this session)\n  Next step        choose a model.",
+            provider_display_name(provider)
+        );
+        println!();
+        return Ok(provider);
+    }
+
+    if let Some(provider) =
+        configured_startup_provider().filter(|provider| available.contains(provider))
+    {
+        println!();
+        println!(
+            "Provider setup\n  No model is configured for this workspace yet.\n  Provider         {} (saved in user settings)\n  Next step        choose a model.",
+            provider_display_name(provider)
+        );
+        println!();
+        return Ok(provider);
+    }
+
+    if let Some(provider) =
+        resolve_preselected_startup_provider(&available, None).map_err(io::Error::other)?
+    {
+        println!();
+        println!(
+            "Provider setup\n  No model is configured for this workspace yet.\n  Provider         {} (only configured provider for this session)\n  Next step        choose a model.",
             provider_display_name(provider)
         );
         println!();
@@ -6771,7 +7165,10 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
         out,
         "  claw-code system-prompt [--cwd PATH] [--date YYYY-MM-DD]"
     )?;
-    writeln!(out, "  claw-code login")?;
+    writeln!(
+        out,
+        "  claw-code login [--provider PROVIDER] [--auth api-key|oauth]"
+    )?;
     writeln!(out, "  claw-code logout")?;
     writeln!(out, "  claw-code init")?;
     writeln!(out, "  claw-code branch delete")?;
@@ -6870,6 +7267,7 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     writeln!(out, "  claw-code mcp show my-server")?;
     writeln!(out, "  claw-code /skills")?;
     writeln!(out, "  claw-code login")?;
+    writeln!(out, "  claw-code login --provider anthropic --auth oauth")?;
     writeln!(out, "  claw-code init")?;
     Ok(())
 }
@@ -6902,8 +7300,8 @@ mod tests {
         slash_command_completion_candidates_with_sessions, status_context, validate_no_args,
         write_mcp_server_fixture, CliAction, CliOutputFormat, CliToolExecutor, GitBranchFreshness,
         GitCommitEntry, GitWorkspaceSummary, GitWorktreeEntry, InternalPromptProgressEvent,
-        InternalPromptProgressState, LiveCli, ModelSource, OpenRouterModel, ProviderKind,
-        SlashCommand, StatusUsage, DEFAULT_MODEL, UNCONFIGURED_MODEL_LABEL,
+        InternalPromptProgressState, LiveCli, LoginAuthMode, ModelSource, OpenRouterModel,
+        ProviderKind, SlashCommand, StatusUsage, DEFAULT_MODEL, UNCONFIGURED_MODEL_LABEL,
     };
     use api::{MessageResponse, OutputContentBlock, Usage};
     use plugins::{
@@ -7381,7 +7779,10 @@ mod tests {
     fn parses_login_and_logout_subcommands() {
         assert_eq!(
             parse_args(&["login".to_string()]).expect("login should parse"),
-            CliAction::Login
+            CliAction::Login {
+                provider: None,
+                auth: None,
+            }
         );
         assert_eq!(
             parse_args(&["logout".to_string()]).expect("logout should parse"),
@@ -7410,6 +7811,89 @@ mod tests {
                 args: Some("--help".to_string())
             }
         );
+    }
+
+    #[test]
+    fn login_command_parses_provider_and_auth_options() {
+        assert_eq!(
+            parse_args(&[
+                "login".to_string(),
+                "--provider".to_string(),
+                "anthropic".to_string(),
+                "--auth".to_string(),
+                "oauth".to_string(),
+            ])
+            .expect("anthropic oauth login should parse"),
+            CliAction::Login {
+                provider: Some(ProviderKind::Anthropic),
+                auth: Some(LoginAuthMode::OAuth),
+            }
+        );
+        assert_eq!(
+            parse_args(&["login".to_string(), "--provider=open-router".to_string(),])
+                .expect("hyphenated provider should parse"),
+            CliAction::Login {
+                provider: Some(ProviderKind::OpenRouter),
+                auth: None,
+            }
+        );
+        assert_eq!(
+            parse_args(&["login".to_string(), "--auth=oauth".to_string()])
+                .expect("oauth login should infer anthropic"),
+            CliAction::Login {
+                provider: Some(ProviderKind::Anthropic),
+                auth: Some(LoginAuthMode::OAuth),
+            }
+        );
+    }
+
+    #[test]
+    fn login_command_rejects_unsupported_auth_provider_combo() {
+        let error = parse_args(&[
+            "login".to_string(),
+            "--provider".to_string(),
+            "openrouter".to_string(),
+            "--auth".to_string(),
+            "oauth".to_string(),
+        ])
+        .expect_err("openrouter oauth should fail");
+        assert!(error.contains("OAuth login is only available for Anthropic"));
+    }
+
+    #[test]
+    fn startup_provider_preference_round_trips_in_user_settings() {
+        let _env_guard = env_lock();
+        let workspace = temp_workspace("startup-provider-workspace");
+        let config_home = temp_workspace("startup-provider-home");
+        fs::create_dir_all(&workspace).expect("workspace should exist");
+        fs::create_dir_all(&config_home).expect("config home should exist");
+        fs::write(
+            config_home.join("settings.json"),
+            r#"{"model":"claude-opus-4-6","hooks":{"PostToolUse":["echo keep"]}}"#,
+        )
+        .expect("seed settings");
+        std::env::set_var("CLAW_CONFIG_HOME", &config_home);
+
+        with_current_dir(&workspace, || {
+            super::save_startup_provider_preference(ProviderKind::OpenRouter)
+                .expect("startup provider should save");
+            assert_eq!(
+                super::configured_startup_provider(),
+                Some(ProviderKind::OpenRouter)
+            );
+        });
+
+        let saved: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(config_home.join("settings.json")).expect("read settings"),
+        )
+        .expect("settings should remain valid json");
+        assert_eq!(saved["startupProvider"], "openrouter");
+        assert_eq!(saved["model"], "claude-opus-4-6");
+        assert_eq!(saved["hooks"]["PostToolUse"][0], "echo keep");
+
+        std::env::remove_var("CLAW_CONFIG_HOME");
+        let _ = fs::remove_dir_all(workspace);
+        let _ = fs::remove_dir_all(config_home);
     }
 
     #[test]

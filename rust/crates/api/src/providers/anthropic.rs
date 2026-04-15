@@ -4,8 +4,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use runtime::format_usd;
 use runtime::{
-    load_oauth_credentials, save_oauth_credentials, OAuthConfig, OAuthRefreshRequest,
-    OAuthTokenExchangeRequest,
+    load_oauth_credentials, load_saved_api_key, save_oauth_credentials, OAuthConfig,
+    OAuthRefreshRequest, OAuthTokenExchangeRequest, SavedApiKeyProvider,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -525,6 +525,9 @@ impl AuthSource {
         if let Some(bearer_token) = read_env_non_empty("ANTHROPIC_AUTH_TOKEN")? {
             return Ok(Self::BearerToken(bearer_token));
         }
+        if let Some(api_key) = load_saved_api_key(SavedApiKeyProvider::Anthropic)? {
+            return Ok(Self::ApiKey(api_key));
+        }
         match load_saved_oauth_token() {
             Ok(Some(token_set)) if oauth_token_is_expired(&token_set) => {
                 if token_set.refresh_token.is_some() {
@@ -563,6 +566,7 @@ pub fn resolve_saved_oauth_token(config: &OAuthConfig) -> Result<Option<OAuthTok
 pub fn has_auth_from_env_or_saved() -> Result<bool, ApiError> {
     Ok(read_env_non_empty("ANTHROPIC_API_KEY")?.is_some()
         || read_env_non_empty("ANTHROPIC_AUTH_TOKEN")?.is_some()
+        || load_saved_api_key(SavedApiKeyProvider::Anthropic)?.is_some()
         || load_saved_oauth_token()?.is_some())
 }
 
@@ -581,6 +585,9 @@ where
     }
     if let Some(bearer_token) = read_env_non_empty("ANTHROPIC_AUTH_TOKEN")? {
         return Ok(AuthSource::BearerToken(bearer_token));
+    }
+    if let Some(api_key) = load_saved_api_key(SavedApiKeyProvider::Anthropic)? {
+        return Ok(AuthSource::ApiKey(api_key));
     }
 
     let Some(token_set) = load_saved_oauth_token()? else {

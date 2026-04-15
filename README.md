@@ -32,6 +32,13 @@ Update an existing install with:
 cargo install --git https://github.com/anupa-perera/claw-code claw-code --locked --force
 ```
 
+If you are replacing an older local/global build, uninstall first:
+
+```bash
+cargo uninstall claw-code
+cargo uninstall rusty-claude-cli
+```
+
 That installs:
 
 - `claw-code` as the primary executable
@@ -53,12 +60,29 @@ claw-code login
 claw-code
 ```
 
-Or use environment variables:
+`claw-code login` is provider-aware. It lets you choose Anthropic, OpenAI, OpenRouter, or xAI, then saves credentials under `~/.claw/` for future runs.
+
+If you want a direct login path, these are also supported:
+
+```bash
+claw-code login --provider anthropic --auth oauth
+claw-code login --provider openrouter
+```
+
+Or use environment variables instead:
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
 claw-code
 ```
+
+Supported environment variables include:
+
+- `ANTHROPIC_API_KEY`
+- `ANTHROPIC_AUTH_TOKEN`
+- `OPENAI_API_KEY`
+- `OPENROUTER_API_KEY`
+- `XAI_API_KEY`
 
 Useful commands:
 

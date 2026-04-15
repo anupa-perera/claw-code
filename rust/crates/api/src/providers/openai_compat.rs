@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::time::Duration;
 
+use runtime::{load_saved_api_key, SavedApiKeyProvider};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -106,7 +107,7 @@ impl OpenAiCompatClient {
     }
 
     pub fn from_env(config: OpenAiCompatConfig) -> Result<Self, ApiError> {
-        let Some(api_key) = read_env_non_empty(config.api_key_env)? else {
+        let Some(api_key) = read_api_key_for_env_var(config.api_key_env)? else {
             return Err(ApiError::missing_credentials(
                 config.provider_name,
                 config.credential_env_vars(),
@@ -882,9 +883,29 @@ fn read_env_non_empty(key: &str) -> Result<Option<String>, ApiError> {
     }
 }
 
+pub(crate) fn read_api_key_for_env_var(key: &str) -> Result<Option<String>, ApiError> {
+    if let Some(value) = read_env_non_empty(key)? {
+        return Ok(Some(value));
+    }
+    let Some(provider) = saved_provider_for_env_var(key) else {
+        return Ok(None);
+    };
+    load_saved_api_key(provider).map_err(ApiError::from)
+}
+
+fn saved_provider_for_env_var(key: &str) -> Option<SavedApiKeyProvider> {
+    match key {
+        "ANTHROPIC_API_KEY" => Some(SavedApiKeyProvider::Anthropic),
+        "OPENAI_API_KEY" => Some(SavedApiKeyProvider::OpenAi),
+        "OPENROUTER_API_KEY" => Some(SavedApiKeyProvider::OpenRouter),
+        "XAI_API_KEY" => Some(SavedApiKeyProvider::Xai),
+        _ => None,
+    }
+}
+
 #[must_use]
 pub fn has_api_key(key: &str) -> bool {
-    read_env_non_empty(key)
+    read_api_key_for_env_var(key)
         .ok()
         .and_then(std::convert::identity)
         .is_some()

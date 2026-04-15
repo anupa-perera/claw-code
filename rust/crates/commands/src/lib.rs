@@ -251,14 +251,14 @@ const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         name: "login",
         aliases: &[],
-        summary: "Log in to the service",
+        summary: "Set up saved provider credentials",
         argument_hint: None,
         resume_supported: false,
     },
     SlashCommandSpec {
         name: "logout",
         aliases: &[],
-        summary: "Log out of the current session",
+        summary: "Clear saved provider credentials",
         argument_hint: None,
         resume_supported: false,
     },

@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
-use std::fs::{self, File};
-use std::io::{self, Read};
-use std::path::PathBuf;
+use std::fs::{self};
+use std::io::{self};
+use std::path::{Path, PathBuf};
 
+use getrandom::getrandom;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -262,13 +263,111 @@ pub fn loopback_redirect_uri(port: u16) -> String {
     format!("http://localhost:{port}/callback")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SavedApiKeyProvider {
+    Anthropic,
+    OpenAi,
+    OpenRouter,
+    Xai,
+}
+
+impl SavedApiKeyProvider {
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Anthropic => "anthropic",
+            Self::OpenAi => "openai",
+            Self::OpenRouter => "openrouter",
+            Self::Xai => "xai",
+        }
+    }
+}
+
 pub fn credentials_path() -> io::Result<PathBuf> {
     Ok(credentials_home_dir()?.join("credentials.json"))
 }
 
+pub fn load_saved_api_key(provider: SavedApiKeyProvider) -> io::Result<Option<String>> {
+    let path = provider_auth_path()?;
+    let root = read_json_root(&path)?;
+    let Some(providers) = root.get("providers").and_then(Value::as_object) else {
+        return Ok(None);
+    };
+    let Some(provider_root) = providers.get(provider.key()).and_then(Value::as_object) else {
+        return Ok(None);
+    };
+    Ok(provider_root
+        .get("apiKey")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned))
+}
+
+pub fn save_api_key(provider: SavedApiKeyProvider, api_key: &str) -> io::Result<()> {
+    let trimmed = api_key.trim();
+    if trimmed.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "api key must not be empty",
+        ));
+    }
+
+    let path = provider_auth_path()?;
+    let mut root = read_json_root(&path)?;
+    root.insert("version".to_string(), Value::from(1));
+
+    let providers = root
+        .entry("providers".to_string())
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "provider-auth.json field 'providers' must be a JSON object",
+            )
+        })?;
+
+    let provider_root = providers
+        .entry(provider.key().to_string())
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "provider-auth.json provider entry must be a JSON object",
+            )
+        })?;
+
+    provider_root.insert("apiKey".to_string(), Value::String(trimmed.to_string()));
+    write_json_root(&path, &root)
+}
+
+pub fn clear_saved_api_key(provider: SavedApiKeyProvider) -> io::Result<()> {
+    let path = provider_auth_path()?;
+    let mut root = read_json_root(&path)?;
+    let Some(providers) = root.get_mut("providers").and_then(Value::as_object_mut) else {
+        return Ok(());
+    };
+
+    let mut remove_provider = false;
+    if let Some(provider_root) = providers
+        .get_mut(provider.key())
+        .and_then(Value::as_object_mut)
+    {
+        provider_root.remove("apiKey");
+        remove_provider = provider_root.is_empty();
+    }
+    if remove_provider {
+        providers.remove(provider.key());
+    }
+
+    write_json_root(&path, &root)
+}
+
 pub fn load_oauth_credentials() -> io::Result<Option<OAuthTokenSet>> {
     let path = credentials_path()?;
-    let root = read_credentials_root(&path)?;
+    let root = read_json_root(&path)?;
     let Some(oauth) = root.get("oauth") else {
         return Ok(None);
     };
@@ -282,20 +381,20 @@ pub fn load_oauth_credentials() -> io::Result<Option<OAuthTokenSet>> {
 
 pub fn save_oauth_credentials(token_set: &OAuthTokenSet) -> io::Result<()> {
     let path = credentials_path()?;
-    let mut root = read_credentials_root(&path)?;
+    let mut root = read_json_root(&path)?;
     root.insert(
         "oauth".to_string(),
         serde_json::to_value(StoredOAuthCredentials::from(token_set.clone()))
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?,
     );
-    write_credentials_root(&path, &root)
+    write_json_root(&path, &root)
 }
 
 pub fn clear_oauth_credentials() -> io::Result<()> {
     let path = credentials_path()?;
-    let mut root = read_credentials_root(&path)?;
+    let mut root = read_json_root(&path)?;
     root.remove("oauth");
-    write_credentials_root(&path, &root)
+    write_json_root(&path, &root)
 }
 
 pub fn parse_oauth_callback_request_target(target: &str) -> Result<OAuthCallbackParams, String> {
@@ -326,7 +425,8 @@ pub fn parse_oauth_callback_query(query: &str) -> Result<OAuthCallbackParams, St
 
 fn generate_random_token(bytes: usize) -> io::Result<String> {
     let mut buffer = vec![0_u8; bytes];
-    File::open("/dev/urandom")?.read_exact(&mut buffer)?;
+    getrandom(&mut buffer)
+        .map_err(|error| io::Error::new(io::ErrorKind::Other, error.to_string()))?;
     Ok(base64url_encode(&buffer))
 }
 
@@ -339,7 +439,11 @@ fn credentials_home_dir() -> io::Result<PathBuf> {
     Ok(PathBuf::from(home).join(".claw"))
 }
 
-fn read_credentials_root(path: &PathBuf) -> io::Result<Map<String, Value>> {
+fn provider_auth_path() -> io::Result<PathBuf> {
+    Ok(credentials_home_dir()?.join("provider-auth.json"))
+}
+
+fn read_json_root(path: &Path) -> io::Result<Map<String, Value>> {
     match fs::read_to_string(path) {
         Ok(contents) => {
             if contents.trim().is_empty() {
@@ -361,7 +465,7 @@ fn read_credentials_root(path: &PathBuf) -> io::Result<Map<String, Value>> {
     }
 }
 
-fn write_credentials_root(path: &PathBuf, root: &Map<String, Value>) -> io::Result<()> {
+fn write_json_root(path: &Path, root: &Map<String, Value>) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -458,10 +562,11 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        clear_oauth_credentials, code_challenge_s256, credentials_path, generate_pkce_pair,
-        generate_state, load_oauth_credentials, loopback_redirect_uri, parse_oauth_callback_query,
-        parse_oauth_callback_request_target, save_oauth_credentials, OAuthAuthorizationRequest,
-        OAuthConfig, OAuthRefreshRequest, OAuthTokenExchangeRequest, OAuthTokenSet,
+        clear_oauth_credentials, clear_saved_api_key, code_challenge_s256, credentials_path,
+        generate_pkce_pair, generate_state, load_oauth_credentials, load_saved_api_key,
+        loopback_redirect_uri, parse_oauth_callback_query, parse_oauth_callback_request_target,
+        save_api_key, save_oauth_credentials, OAuthAuthorizationRequest, OAuthConfig,
+        OAuthRefreshRequest, OAuthTokenExchangeRequest, OAuthTokenSet, SavedApiKeyProvider,
     };
 
     fn sample_config() -> OAuthConfig {
@@ -573,6 +678,44 @@ mod tests {
         let cleared = std::fs::read_to_string(&path).expect("read cleared file");
         assert!(cleared.contains("\"other\": \"value\""));
         assert!(!cleared.contains("\"oauth\""));
+
+        std::env::remove_var("CLAW_CONFIG_HOME");
+        std::fs::remove_dir_all(config_home).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn provider_api_keys_round_trip_and_preserve_other_entries() {
+        let _guard = env_lock();
+        let config_home = temp_config_home();
+        std::env::set_var("CLAW_CONFIG_HOME", &config_home);
+        let path = config_home.join("provider-auth.json");
+        std::fs::create_dir_all(&config_home).expect("create config home");
+        std::fs::write(
+            &path,
+            "{\n  \"version\": 1,\n  \"providers\": {\n    \"openrouter\": { \"apiKey\": \"or-test\" },\n    \"xai\": { \"note\": \"keep\" }\n  }\n}\n",
+        )
+        .expect("seed provider auth");
+
+        save_api_key(SavedApiKeyProvider::Anthropic, "anthropic-test").expect("save anthropic key");
+        assert_eq!(
+            load_saved_api_key(SavedApiKeyProvider::Anthropic).expect("load anthropic key"),
+            Some("anthropic-test".to_string())
+        );
+        assert_eq!(
+            load_saved_api_key(SavedApiKeyProvider::OpenRouter).expect("load openrouter key"),
+            Some("or-test".to_string())
+        );
+
+        clear_saved_api_key(SavedApiKeyProvider::Anthropic).expect("clear anthropic key");
+        assert_eq!(
+            load_saved_api_key(SavedApiKeyProvider::Anthropic).expect("load cleared anthropic key"),
+            None
+        );
+
+        let saved = std::fs::read_to_string(&path).expect("read saved provider auth");
+        assert!(saved.contains("\"openrouter\""));
+        assert!(saved.contains("\"or-test\""));
+        assert!(saved.contains("\"note\": \"keep\""));
 
         std::env::remove_var("CLAW_CONFIG_HOME");
         std::fs::remove_dir_all(config_home).expect("cleanup temp dir");

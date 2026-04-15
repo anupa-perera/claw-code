@@ -23,6 +23,13 @@ To update an existing global install:
 cargo install --git https://github.com/anupa-perera/claw-code claw-code --locked --force
 ```
 
+If you are replacing an older install cleanly first:
+
+```bash
+cargo uninstall claw-code
+cargo uninstall rusty-claude-cli
+```
+
 Then run the CLI from any project:
 
 ```bash
@@ -33,8 +40,12 @@ claw-code
 
 - Rust toolchain with `cargo`
 - One of:
-  - `ANTHROPIC_API_KEY` for direct API access
-  - `claw-code login` for OAuth-based auth
+  - `claw-code login` for saved provider credentials
+  - `ANTHROPIC_API_KEY`
+  - `ANTHROPIC_AUTH_TOKEN`
+  - `OPENAI_API_KEY`
+  - `OPENROUTER_API_KEY`
+  - `XAI_API_KEY`
 - Optional: `ANTHROPIC_BASE_URL` when targeting a proxy or local service
 
 ## Build the workspace
@@ -94,24 +105,35 @@ Supported permission modes:
 
 Model aliases currently supported by the CLI:
 
-- `opus` → `claude-opus-4-6`
-- `sonnet` → `claude-sonnet-4-6`
-- `haiku` → `claude-haiku-4-5-20251213`
+- `opus` -> `claude-opus-4-6`
+- `sonnet` -> `claude-sonnet-4-6`
+- `haiku` -> `claude-haiku-4-5-20251213`
 
 ## Authentication
 
-### API key
+### Provider-aware login
+
+```bash
+claw-code login
+```
+
+Examples:
+
+```bash
+claw-code login --provider anthropic --auth oauth
+claw-code login --provider anthropic --auth api-key
+claw-code login --provider openrouter
+claw-code login --provider openai
+claw-code login --provider xai
+```
+
+Saved API keys live in `~/.claw/provider-auth.json`. Anthropic OAuth tokens live in `~/.claw/credentials.json`.
+
+### Environment variables
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
-```
-
-### OAuth
-
-```bash
-cd rust
-./target/debug/claw-code login
-./target/debug/claw-code logout
+export OPENROUTER_API_KEY="sk-or-..."
 ```
 
 ## Common operational commands

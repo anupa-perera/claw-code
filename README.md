@@ -1,206 +1,125 @@
-# Rewriting Project Claw Code
+# Claw Code
 
 <p align="center">
-  <strong>⭐ The fastest repo in history to surpass 50K stars, reaching the milestone in just 2 hours after publication ⭐</strong>
+  <img src="assets/clawd-hero.jpeg" alt="Claw Code" width="280" />
 </p>
 
-<p align="center">
-  <a href="https://star-history.com/#anupa-perera/claw-code&Date">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=anupa-perera/claw-code&type=Date&theme=dark" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=anupa-perera/claw-code&type=Date" />
-      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=anupa-perera/claw-code&type=Date" width="600" />
-    </picture>
-  </a>
-</p>
+A maintained fork of the Claw Code agent harness with an installable Rust CLI on `main`.
 
-<p align="center">
-  <img src="assets/clawd-hero.jpeg" alt="Claw" width="300" />
-</p>
+The active product in this repo is the Rust workspace in [`rust/`](./rust). The main outcome of this fork is that the CLI can now be installed globally and used from any project as `claw-code`, while still keeping `claw` as a compatibility alias.
 
-<p align="center">
-  <strong>Autonomously maintained by lobsters/claws — not by human hands</strong>
-</p>
+## What This Fork Achieves
 
-<p align="center">
-  <a href="https://github.com/Yeachan-Heo/clawhip">clawhip</a> ·
-  <a href="https://github.com/code-yeongyu/oh-my-openagent">oh-my-openagent</a> ·
-  <a href="https://github.com/Yeachan-Heo/oh-my-claudecode">oh-my-claudecode</a> ·
-  <a href="https://github.com/Yeachan-Heo/oh-my-codex">oh-my-codex</a> ·
-  <a href="https://discord.gg/6ztZB9jvWq">UltraWorkers Discord</a>
-</p>
+- packages the Rust CLI as a real installable command
+- standardizes the public command name as `claw-code`
+- keeps `claw` available as a compatibility alias
+- aligns user and project state around `.claw`
+- supports running from an installed binary instead of requiring a repo checkout
+- keeps the Windows launcher and onboarding flow working with the packaged CLI
+- preserves parity and test coverage around sessions, commands, and bundled plugins
 
-> [!IMPORTANT]
-> The active Rust workspace now lives in [`rust/`](./rust). Start with [`USAGE.md`](./USAGE.md) for build, auth, CLI, session, and parity-harness workflows, then use [`rust/README.md`](./rust/README.md) for crate-level details.
->
-> Install the global CLI from `main` with Cargo:
-> `cargo install --git https://github.com/anupa-perera/claw-code claw-code --locked`
+## Install
 
-That installs the primary `claw-code` executable and the compatibility alias `claw`.
+Install from this repository's `main` branch:
 
-To use it globally:
+```bash
+cargo install --git https://github.com/anupa-perera/claw-code claw-code --locked
+```
 
-- install Rust and Cargo
-- make sure Cargo's bin directory is on your `PATH`
-- run `claw-code` from any project directory
-- authenticate with `claw-code login` or provide a provider API key through env vars
+Update an existing install with:
+
+```bash
+cargo install --git https://github.com/anupa-perera/claw-code claw-code --locked --force
+```
+
+That installs:
+
+- `claw-code` as the primary executable
+- `claw` as a compatibility alias
 
 Cargo's default global bin directory is:
 
 - Windows: `%USERPROFILE%\.cargo\bin`
 - macOS/Linux: `~/.cargo/bin`
 
-To update an existing global install:
+If `claw-code` is not found after install, add that directory to `PATH` and restart your shell.
 
-`cargo install --git https://github.com/anupa-perera/claw-code claw-code --locked --force`
+## Quick Start
 
-> Want the bigger idea behind this repo? Read [`PHILOSOPHY.md`](./PHILOSOPHY.md) and Sigrid Jin's public explanation: https://x.com/realsigridjin/status/2039472968624185713
-
-> Shout-out to the UltraWorkers ecosystem powering this repo: [clawhip](https://github.com/Yeachan-Heo/clawhip), [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent), [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode), [oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex), and the [UltraWorkers Discord](https://discord.gg/6ztZB9jvWq).
-
----
-
-## Backstory
-
-This repo is maintained by **lobsters/claws**, not by a conventional human-only dev team.
-
-The people behind the system are [Bellman / Yeachan Heo](https://github.com/Yeachan-Heo) and friends like [Yeongyu](https://github.com/code-yeongyu), but the repo itself is being pushed forward by autonomous claw workflows: parallel coding sessions, event-driven orchestration, recovery loops, and machine-readable lane state.
-
-In practice, that means this project is not just *about* coding agents — it is being **actively built by them**. Features, tests, telemetry, docs, and workflow hardening are landed through claw-driven loops using [clawhip](https://github.com/Yeachan-Heo/clawhip), [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent), [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode), and [oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex).
-
-This repository exists to prove that an open coding harness can be built **autonomously, in public, and at high velocity** — with humans setting direction and claws doing the grinding.
-
-See the public build story here:
-
-https://x.com/realsigridjin/status/2039472968624185713
-
-![Tweet screenshot](assets/tweet-screenshot.png)
-
----
-
-## Porting Status
-
-The main source tree is now Python-first.
-
-- `src/` contains the active Python porting workspace
-- `tests/` verifies the current Python workspace
-- the exposed snapshot is no longer part of the tracked repository state
-
-The current Python workspace is not yet a complete one-to-one replacement for the original system, but the primary implementation surface is now Python.
-
-## Why this rewrite exists
-
-I originally studied the exposed codebase to understand its harness, tool wiring, and agent workflow. After spending more time with the legal and ethical questions—and after reading the essay linked below—I did not want the exposed snapshot itself to remain the main tracked source tree.
-
-This repository now focuses on Python porting work instead.
-
-## Repository Layout
-
-```text
-.
-├── src/                                # Python porting workspace
-│   ├── __init__.py
-│   ├── commands.py
-│   ├── main.py
-│   ├── models.py
-│   ├── port_manifest.py
-│   ├── query_engine.py
-│   ├── task.py
-│   └── tools.py
-├── tests/                              # Python verification
-├── assets/omx/                         # OmX workflow screenshots
-├── 2026-03-09-is-legal-the-same-as-legitimate-ai-reimplementation-and-the-erosion-of-copyleft.md
-└── README.md
-```
-
-## Python Workspace Overview
-
-The new Python `src/` tree currently provides:
-
-- **`port_manifest.py`** — summarizes the current Python workspace structure
-- **`models.py`** — dataclasses for subsystems, modules, and backlog state
-- **`commands.py`** — Python-side command port metadata
-- **`tools.py`** — Python-side tool port metadata
-- **`query_engine.py`** — renders a Python porting summary from the active workspace
-- **`main.py`** — a CLI entrypoint for manifest and summary output
-
-## Quickstart
-
-Render the Python porting summary:
+Authenticate, then start the CLI from any project:
 
 ```bash
-python3 -m src.main summary
+claw-code login
+claw-code
 ```
 
-Print the current Python workspace manifest:
+Or use environment variables:
 
 ```bash
-python3 -m src.main manifest
+export ANTHROPIC_API_KEY="sk-ant-..."
+claw-code
 ```
 
-List the current Python modules:
+Useful commands:
 
 ```bash
-python3 -m src.main subsystems --limit 16
+claw-code --help
+claw-code prompt "summarize this repository"
+claw-code status
+claw-code hook list
+claw-code --resume latest
 ```
 
-Run verification:
+## Configuration Model
 
-```bash
-python3 -m unittest discover -s tests -v
+The current setup is:
+
+- user-level state and saved credentials live under `~/.claw/`
+- repo defaults live in `.claw.json`
+- repo-local overrides live in `.claw/settings.json`
+- sessions are stored in `.claw/sessions/`
+
+This matters because a globally installed CLI still needs a stable separation between user state and project state. The package install provides the binary, while each project continues to own its own local config and sessions.
+
+## Windows Workflow
+
+If you are using this repo directly on Windows, you can still launch through the root script:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\claw-code.ps1
 ```
 
-Run the parity audit against the local ignored archive (when present):
+That path is useful when working from the checkout itself. Once the package is installed globally, the intended command is simply:
 
-```bash
-python3 -m src.main parity-audit
+```powershell
+claw-code
 ```
 
-Inspect mirrored command/tool inventories:
+## Repository Guide
 
-```bash
-python3 -m src.main commands --limit 10
-python3 -m src.main tools --limit 10
-```
+The main places to start are:
 
-## Current Parity Checkpoint
+- [`rust/README.md`](./rust/README.md) for crate-level architecture and runtime details
+- [`USAGE.md`](./USAGE.md) for copy/paste usage examples
+- [`ROADMAP.md`](./ROADMAP.md) for planned work
+- [`PARITY.md`](./PARITY.md) for parity tracking
+- [`PHILOSOPHY.md`](./PHILOSOPHY.md) for the broader project motivation
 
-The port now mirrors the archived root-entry file surface, top-level subsystem names, and command/tool inventories much more closely than before. However, it is **not yet** a full runtime-equivalent replacement for the original TypeScript system; the Python tree still contains fewer executable runtime slices than the archived source.
+## Credits
 
+This fork builds on the original Claw Code work and the surrounding UltraWorkers ecosystem.
 
-## Built with `oh-my-codex`
+Original credit belongs to:
 
-The restructuring and documentation work on this repository was AI-assisted and orchestrated with Yeachan Heo's [oh-my-codex (OmX)](https://github.com/Yeachan-Heo/oh-my-codex), layered on top of Codex.
+- Bellman / Yeachan Heo
+- Yeongyu
+- the contributors behind Claw Code and the related UltraWorkers projects
 
-- **`$team` mode:** used for coordinated parallel review and architectural feedback
-- **`$ralph` mode:** used for persistent execution, verification, and completion discipline
-- **Codex-driven workflow:** used to turn the main `src/` tree into a Python-first porting workspace
+Related upstream and ecosystem projects:
 
-### OmX workflow screenshots
+- [clawhip](https://github.com/Yeachan-Heo/clawhip)
+- [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent)
+- [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode)
+- [oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex)
 
-![OmX workflow screenshot 1](assets/omx/omx-readme-review-1.png)
-
-*Ralph/team orchestration view while the README and essay context were being reviewed in terminal panes.*
-
-![OmX workflow screenshot 2](assets/omx/omx-readme-review-2.png)
-
-*Split-pane review and verification flow during the final README wording pass.*
-
-## Community
-
-<p align="center">
-  <a href="https://instruct.kr/"><img src="assets/instructkr.png" alt="instructkr" width="400" /></a>
-</p>
-
-Join the [**instructkr Discord**](https://instruct.kr/) — the best Korean language model community. Come chat about LLMs, harness engineering, agent workflows, and everything in between.
-
-[![Discord](https://img.shields.io/badge/Join%20Discord-instruct.kr-5865F2?logo=discord&style=for-the-badge)](https://instruct.kr/)
-
-## Star History
-
-See the chart at the top of this README.
-
-## Ownership / Affiliation Disclaimer
-
-- This repository does **not** claim ownership of the original Claude Code source material.
-- This repository is **not affiliated with, endorsed by, or maintained by Anthropic**.
+This repository does not claim authorship of the original system design, and it is not affiliated with or endorsed by Anthropic.

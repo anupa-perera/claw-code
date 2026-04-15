@@ -16,9 +16,10 @@ That matters most for:
 If you want the most budget-friendly starting point after install, OpenRouter is usually the best first provider to try:
 
 ```bash
-claw-code login --provider openrouter
 claw-code
 ```
+
+On a fresh install, bare `claw-code` will now handle provider onboarding inline when no credentials are saved yet. Choose OpenRouter on first run, paste `OPENROUTER_API_KEY`, then continue straight into model selection and the console.
 
 Install from `main`:
 
@@ -52,11 +53,14 @@ Then run the CLI from any project:
 claw-code
 ```
 
+If install, login, or Windows shell behavior does not match expectations, see [`TROUBLESHOOTING.md`](./TROUBLESHOOTING.md).
+
 ## Prerequisites
 
 - Rust toolchain with `cargo`
 - One of:
-  - `claw-code login` for saved provider credentials
+  - first-run onboarding through bare `claw-code`
+  - `claw-code login` for explicit saved provider setup
   - `ANTHROPIC_API_KEY`
   - `ANTHROPIC_AUTH_TOKEN`
   - `OPENAI_API_KEY`

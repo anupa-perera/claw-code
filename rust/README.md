@@ -53,12 +53,15 @@ Cargo's default global bin directory is:
 
 If `claw-code` is not found after install, add that directory to `PATH` and restart your shell.
 
+For install, login, or Windows-specific issues, see [`../TROUBLESHOOTING.md`](../TROUBLESHOOTING.md).
+
 Typical first-run flow:
 
 ```bash
-claw-code login
 claw-code
 ```
+
+On a fresh install, bare `claw-code` now owns first-run onboarding. If no provider credentials exist yet, it asks for a provider, captures the needed credential, then continues into model selection and the REPL.
 
 Useful direct login flows:
 

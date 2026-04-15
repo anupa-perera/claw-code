@@ -1160,17 +1160,55 @@ fn resolve_anthropic_login_method(
 }
 
 fn prompt_for_api_key(provider: ProviderKind) -> Result<String, Box<dyn std::error::Error>> {
-    let api_key = prompt_password(format!(
-        "Paste your {} (input hidden): ",
-        provider_api_env_var(provider)
-    ))?;
-    let api_key = api_key.trim().to_string();
-    if api_key.is_empty() {
-        return Err(
-            io::Error::new(io::ErrorKind::InvalidInput, "api key must not be empty").into(),
+    loop {
+        let api_key = prompt_password(format!(
+            "Paste your {} (input hidden): ",
+            provider_api_env_var(provider)
+        ))?;
+        let api_key = api_key.trim().to_string();
+        if !api_key.is_empty() {
+            return Ok(api_key);
+        }
+
+        println!(
+            "No characters were captured. Some terminals do not handle hidden paste reliably."
         );
+        print!("Paste the key visibly instead? [y/N]: ");
+        io::stdout().flush()?;
+
+        let mut answer = String::new();
+        let read = io::stdin().read_line(&mut answer)?;
+        if read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "api key entry ended before input was captured",
+            )
+            .into());
+        }
+        let answer = answer.trim().to_ascii_lowercase();
+        if !matches!(answer.as_str(), "y" | "yes") {
+            println!("Retrying hidden input. Paste the key, then press Enter once.");
+            continue;
+        }
+
+        print!("Paste your {}: ", provider_api_env_var(provider));
+        io::stdout().flush()?;
+        let mut visible = String::new();
+        let read = io::stdin().read_line(&mut visible)?;
+        if read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "api key entry ended before input was captured",
+            )
+            .into());
+        }
+        let visible = visible.trim().to_string();
+        if !visible.is_empty() {
+            return Ok(visible);
+        }
+
+        println!("API key must not be empty.");
     }
-    Ok(api_key)
 }
 
 fn save_provider_api_key_flow(provider: ProviderKind) -> Result<(), Box<dyn std::error::Error>> {
@@ -1184,6 +1222,12 @@ fn save_provider_api_key_flow(provider: ProviderKind) -> Result<(), Box<dyn std:
         provider_display_name(provider)
     );
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ProviderOnboardingResult {
+    provider: ProviderKind,
+    saved_as_startup_default: bool,
 }
 
 fn prompt_to_remember_startup_provider(
@@ -1220,10 +1264,10 @@ fn default_oauth_config() -> OAuthConfig {
     }
 }
 
-fn run_login(
+fn run_provider_onboarding(
     provider_override: Option<ProviderKind>,
     auth_override: Option<LoginAuthMode>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<ProviderOnboardingResult, Box<dyn std::error::Error>> {
     let provider = match provider_override {
         Some(provider) => provider,
         None => prompt_for_login_provider()?,
@@ -1245,16 +1289,51 @@ fn run_login(
         }
     }
 
-    if prompt_to_remember_startup_provider(provider)? {
+    let saved_as_startup_default = if prompt_to_remember_startup_provider(provider)? {
         save_startup_provider_preference(provider)?;
         println!(
             "Saved {} as the default startup provider for future interactive launches.",
             provider_display_name(provider)
         );
-    }
+        true
+    } else {
+        false
+    };
 
-    println!("{} login complete.", provider_display_name(provider));
+    Ok(ProviderOnboardingResult {
+        provider,
+        saved_as_startup_default,
+    })
+}
+
+fn run_login(
+    provider_override: Option<ProviderKind>,
+    auth_override: Option<LoginAuthMode>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let onboarding = run_provider_onboarding(provider_override, auth_override)?;
+    println!(
+        "{} login complete.",
+        provider_display_name(onboarding.provider)
+    );
     Ok(())
+}
+
+fn onboard_startup_provider() -> Result<ProviderKind, Box<dyn std::error::Error>> {
+    println!();
+    println!(
+        "Provider setup\n  No provider credentials are configured yet.\n  First run         let's set one up now, then we'll continue into model selection."
+    );
+    let onboarding = run_provider_onboarding(startup_provider_override(), None)?;
+    println!();
+    println!(
+        "Provider setup\n  Credentials      {} ready.\n  Next step        choose a model.",
+        provider_display_name(onboarding.provider)
+    );
+    if onboarding.saved_as_startup_default {
+        println!("  Startup default  saved for future interactive launches.");
+    }
+    println!();
+    Ok(onboarding.provider)
 }
 
 fn run_anthropic_oauth_login() -> Result<(), Box<dyn std::error::Error>> {
@@ -2825,10 +2904,7 @@ const fn provider_credential_hint(provider: ProviderKind) -> &'static str {
 fn prompt_for_startup_provider() -> Result<ProviderKind, Box<dyn std::error::Error>> {
     let available = available_startup_providers();
     if available.is_empty() {
-        return Err(io::Error::other(
-            "No provider credentials were found. Configure ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, OPENAI_API_KEY, OPENROUTER_API_KEY, or XAI_API_KEY, or run `claw-code login` before starting a fresh interactive session.",
-        )
-        .into());
+        return onboard_startup_provider();
     }
 
     if let Some(provider) =

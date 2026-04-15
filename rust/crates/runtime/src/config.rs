@@ -467,8 +467,26 @@ impl RuntimePluginConfig {
 pub fn default_config_home() -> PathBuf {
     std::env::var_os("CLAW_CONFIG_HOME")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".claw")))
+        .or_else(|| resolve_user_home_dir().map(|home| home.join(".claw")))
         .unwrap_or_else(|| PathBuf::from(".claw"))
+}
+
+pub(crate) fn resolve_user_home_dir() -> Option<PathBuf> {
+    fn non_empty_env_path(name: &str) -> Option<PathBuf> {
+        std::env::var_os(name)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    }
+
+    non_empty_env_path("HOME")
+        .or_else(|| non_empty_env_path("USERPROFILE"))
+        .or_else(|| {
+            let drive = std::env::var_os("HOMEDRIVE").filter(|value| !value.is_empty())?;
+            let path = std::env::var_os("HOMEPATH").filter(|value| !value.is_empty())?;
+            let mut combined = std::ffi::OsString::from(drive);
+            combined.push(path);
+            Some(PathBuf::from(combined))
+        })
 }
 
 impl RuntimeHookConfig {
@@ -1091,6 +1109,7 @@ mod tests {
     };
     use crate::json::JsonValue;
     use crate::sandbox::FilesystemIsolationMode;
+    use std::ffi::OsString;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1100,6 +1119,44 @@ mod tests {
             .expect("time should be after epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("runtime-config-{nanos}"))
+    }
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::test_env_lock()
+    }
+
+    fn restore_env_var(key: &str, original: Option<OsString>) {
+        match original {
+            Some(value) => std::env::set_var(key, value),
+            None => std::env::remove_var(key),
+        }
+    }
+
+    #[test]
+    fn default_config_home_uses_userprofile_when_home_is_missing() {
+        let _guard = env_lock();
+        let original_claw_config_home = std::env::var_os("CLAW_CONFIG_HOME");
+        let original_home = std::env::var_os("HOME");
+        let original_userprofile = std::env::var_os("USERPROFILE");
+        let original_homedrive = std::env::var_os("HOMEDRIVE");
+        let original_homepath = std::env::var_os("HOMEPATH");
+
+        std::env::remove_var("CLAW_CONFIG_HOME");
+        std::env::remove_var("HOME");
+        std::env::remove_var("HOMEDRIVE");
+        std::env::remove_var("HOMEPATH");
+        std::env::set_var("USERPROFILE", r"C:\Users\TestUser");
+
+        assert_eq!(
+            super::default_config_home(),
+            std::path::PathBuf::from(r"C:\Users\TestUser\.claw")
+        );
+
+        restore_env_var("CLAW_CONFIG_HOME", original_claw_config_home);
+        restore_env_var("HOME", original_home);
+        restore_env_var("USERPROFILE", original_userprofile);
+        restore_env_var("HOMEDRIVE", original_homedrive);
+        restore_env_var("HOMEPATH", original_homepath);
     }
 
     #[test]

@@ -434,9 +434,13 @@ fn credentials_home_dir() -> io::Result<PathBuf> {
     if let Some(path) = std::env::var_os("CLAW_CONFIG_HOME") {
         return Ok(PathBuf::from(path));
     }
-    let home = std::env::var_os("HOME")
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME is not set"))?;
-    Ok(PathBuf::from(home).join(".claw"))
+    let home = crate::config::resolve_user_home_dir().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "could not determine the user home directory from HOME, USERPROFILE, or HOMEDRIVE/HOMEPATH",
+        )
+    })?;
+    Ok(home.join(".claw"))
 }
 
 fn provider_auth_path() -> io::Result<PathBuf> {
@@ -559,6 +563,7 @@ fn decode_hex(byte: u8) -> Result<u8, String> {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
@@ -593,6 +598,13 @@ mod tests {
                 .expect("time")
                 .as_nanos()
         ))
+    }
+
+    fn restore_env_var(key: &str, original: Option<OsString>) {
+        match original {
+            Some(value) => std::env::set_var(key, value),
+            None => std::env::remove_var(key),
+        }
     }
 
     #[test]
@@ -719,6 +731,34 @@ mod tests {
 
         std::env::remove_var("CLAW_CONFIG_HOME");
         std::fs::remove_dir_all(config_home).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn credentials_home_dir_uses_userprofile_when_home_is_missing() {
+        let _guard = env_lock();
+        let original_claw_config_home = std::env::var_os("CLAW_CONFIG_HOME");
+        let original_home = std::env::var_os("HOME");
+        let original_userprofile = std::env::var_os("USERPROFILE");
+        let original_homedrive = std::env::var_os("HOMEDRIVE");
+        let original_homepath = std::env::var_os("HOMEPATH");
+
+        std::env::remove_var("CLAW_CONFIG_HOME");
+        std::env::remove_var("HOME");
+        std::env::remove_var("HOMEDRIVE");
+        std::env::remove_var("HOMEPATH");
+        std::env::set_var("USERPROFILE", r"C:\Users\TestUser");
+
+        let path = credentials_path().expect("credentials path should resolve");
+        assert_eq!(
+            path,
+            std::path::PathBuf::from(r"C:\Users\TestUser\.claw\credentials.json")
+        );
+
+        restore_env_var("CLAW_CONFIG_HOME", original_claw_config_home);
+        restore_env_var("HOME", original_home);
+        restore_env_var("USERPROFILE", original_userprofile);
+        restore_env_var("HOMEDRIVE", original_homedrive);
+        restore_env_var("HOMEPATH", original_homepath);
     }
 
     #[test]

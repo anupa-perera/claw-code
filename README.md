@@ -70,16 +70,19 @@ Cargo's default global bin directory is:
 
 If `claw-code` is not found after install, add that directory to `PATH` and restart your shell.
 
+For install, login, or Windows command-resolution issues, see [`TROUBLESHOOTING.md`](./TROUBLESHOOTING.md).
+
 ## Quick Start
 
-Authenticate, then start the CLI from any project:
+Start the CLI from any project:
 
 ```bash
-claw-code login
 claw-code
 ```
 
-`claw-code login` is provider-aware. It lets you choose Anthropic, OpenAI, OpenRouter, or xAI, then saves credentials under `~/.claw/` for future runs.
+On a fresh install, `claw-code` now handles first-run onboarding inline. If no provider credentials exist yet, it will ask you to choose a provider, collect the credential it needs, then continue straight into model selection and the interactive console.
+
+`claw-code login` is still available as the explicit setup command. It is provider-aware, lets you choose Anthropic, OpenAI, OpenRouter, or xAI, and saves credentials under `~/.claw/` for future runs.
 
 If you want a direct login path, these are also supported:
 
@@ -153,6 +156,7 @@ The main places to start are:
 
 - [`rust/README.md`](./rust/README.md) for crate-level architecture and runtime details
 - [`USAGE.md`](./USAGE.md) for copy/paste usage examples
+- [`TROUBLESHOOTING.md`](./TROUBLESHOOTING.md) for install, login, and Windows-specific issues
 - [`ROADMAP.md`](./ROADMAP.md) for planned work
 - [`PARITY.md`](./PARITY.md) for parity tracking
 - [`PHILOSOPHY.md`](./PHILOSOPHY.md) for the broader project motivation

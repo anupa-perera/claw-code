@@ -2,7 +2,23 @@
 
 This guide covers the current Rust workspace under `rust/` and the `claw-code` CLI binary.
 
+The biggest end-user addition in this fork is the OpenRouter path. It gives you a practical way to use `claw-code` with one API key across many model families, including lower-cost and free-tier options when OpenRouter makes them available.
+
+That matters most for:
+
+- students learning and building on tight budgets
+- indie developers trying to keep inference costs low
+- teams using cheaper models for routine work and premium models only when needed
+- anyone frustrated by token limits or paid-provider-first onboarding
+
 ## Global install
+
+If you want the most budget-friendly starting point after install, OpenRouter is usually the best first provider to try:
+
+```bash
+claw-code login --provider openrouter
+claw-code
+```
 
 Install from `main`:
 

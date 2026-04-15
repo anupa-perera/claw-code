@@ -4,6 +4,10 @@ This workspace contains the active Rust product for this repository: the install
 
 For copy/paste usage examples, see [`../USAGE.md`](../USAGE.md).
 
+The biggest end-user contribution in this fork is the OpenRouter path. The packaging and install work matter because they make that OpenRouter workflow usable from any project, not just from a repo checkout.
+
+OpenRouter is the headline addition because it gives one key access to many model families and often exposes lower-cost and free-tier options when available. That makes this fork especially useful for students, low-budget builders, and teams that want to work in pricing tiers.
+
 ## Install
 
 Install the CLI globally from `main` with Cargo:
@@ -62,6 +66,8 @@ Useful direct login flows:
 claw-code login --provider anthropic --auth oauth
 claw-code login --provider openrouter
 ```
+
+If your main goal is lower-cost usage, start with OpenRouter and pick a free-tier or budget-friendly model from the catalog after login.
 
 ## Quick start
 

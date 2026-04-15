@@ -85,16 +85,16 @@ const CLI_OPTION_SUGGESTIONS: &[&str] = &[
 
 type AllowedToolSet = BTreeSet<String>;
 
-fn main() {
+pub fn main() {
     if let Err(error) = run() {
         let message = error.to_string();
-        if message.contains("`claw --help`") {
+        if message.contains("`claw-code --help`") {
             eprintln!("error: {message}");
         } else {
             eprintln!(
                 "error: {message}
 
-Run `claw --help` for usage."
+Run `claw-code --help` for usage."
             );
         }
         std::process::exit(1);
@@ -467,11 +467,11 @@ fn bare_slash_command_guidance(command_name: &str) -> Option<String> {
         .find(|spec| spec.name == command_name)?;
     let guidance = if slash_command.resume_supported {
         format!(
-            "`claw {command_name}` is a slash command. Use `claw --resume SESSION.jsonl /{command_name}` or start `claw` and run `/{command_name}`."
+            "`claw-code {command_name}` is a slash command. Use `claw-code --resume SESSION.jsonl /{command_name}` or start `claw-code` and run `/{command_name}`."
         )
     } else {
         format!(
-            "`claw {command_name}` is a slash command. Start `claw` and run `/{command_name}` inside the REPL."
+            "`claw-code {command_name}` is a slash command. Start `claw-code` and run `/{command_name}` inside the REPL."
         )
     };
     Some(guidance)
@@ -501,7 +501,7 @@ fn parse_direct_slash_cli_action(rest: &[String]) -> Result<CliAction, String> {
         Ok(Some(command)) => Err({
             let _ = command;
             format!(
-                "slash command {command_name} is interactive-only. Start `claw` and run it there, or use `claw --resume SESSION.jsonl {command_name}` / `claw --resume {latest} {command_name}` when the command is marked [resume] in /help.",
+                "slash command {command_name} is interactive-only. Start `claw-code` and run it there, or use `claw-code --resume SESSION.jsonl {command_name}` / `claw-code --resume {latest} {command_name}` when the command is marked [resume] in /help.",
                 command_name = rest[0],
                 latest = LATEST_SESSION_REFERENCE,
             )
@@ -518,7 +518,7 @@ fn format_unknown_option(option: &str) -> String {
         message.push_str(suggestion);
         message.push('?');
     }
-    message.push_str("\nRun `claw --help` for usage.");
+    message.push_str("\nRun `claw-code --help` for usage.");
     message
 }
 
@@ -529,7 +529,7 @@ fn format_unknown_direct_slash_command(name: &str) -> String {
         message.push('\n');
         message.push_str(&suggestions);
     }
-    message.push_str("\nRun `claw --help` for CLI usage, or start `claw` and use /help.");
+    message.push_str("\nRun `claw-code --help` for CLI usage, or start `claw-code` and use /help.");
     message
 }
 
@@ -767,30 +767,30 @@ fn parse_system_prompt_args(args: &[String]) -> Result<CliAction, String> {
 
 fn parse_config_args(args: &[String]) -> Result<CliAction, String> {
     match args {
-        [] => Err("Usage: claw config show".to_string()),
+        [] => Err("Usage: claw-code config show".to_string()),
         [action] if action == "show" => Ok(CliAction::ConfigShow),
         [action, ..] => Err(format!(
-            "unknown config action: {action}. Usage: claw config show"
+            "unknown config action: {action}. Usage: claw-code config show"
         )),
     }
 }
 
 fn parse_hook_args(args: &[String]) -> Result<CliAction, String> {
     match args {
-        [] => Err("Usage: claw hook list".to_string()),
+        [] => Err("Usage: claw-code hook list".to_string()),
         [action] if action == "list" => Ok(CliAction::HookList),
         [action, ..] => Err(format!(
-            "unknown hook action: {action}. Usage: claw hook list"
+            "unknown hook action: {action}. Usage: claw-code hook list"
         )),
     }
 }
 
 fn parse_branch_args(args: &[String]) -> Result<CliAction, String> {
     match args {
-        [] => Err("Usage: claw branch delete".to_string()),
+        [] => Err("Usage: claw-code branch delete".to_string()),
         [action] if action == "delete" => Ok(CliAction::BranchDelete),
         [action, ..] => Err(format!(
-            "unknown branch action: {action}. Usage: claw branch delete"
+            "unknown branch action: {action}. Usage: claw-code branch delete"
         )),
     }
 }
@@ -1637,7 +1637,7 @@ fn run_resume_command(
             Ok(ResumeCommandOutcome {
                 session: cleared,
                 message: Some(format!(
-                    "Session cleared\n  Mode             resumed session reset\n  Previous session {previous_session_id}\n  Backup           {}\n  Resume previous  claw --resume {}\n  New session      {new_session_id}\n  Session file     {}",
+                    "Session cleared\n  Mode             resumed session reset\n  Previous session {previous_session_id}\n  Backup           {}\n  Resume previous  claw-code --resume {}\n  New session      {new_session_id}\n  Session file     {}",
                     backup_path.display(),
                     backup_path.display(),
                     session_path.display()
@@ -2445,7 +2445,7 @@ const fn provider_display_name(provider: ProviderKind) -> &'static str {
 
 const fn provider_credential_hint(provider: ProviderKind) -> &'static str {
     match provider {
-        ProviderKind::Anthropic => "ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or `claw login`",
+        ProviderKind::Anthropic => "ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or `claw-code login`",
         ProviderKind::OpenAi => "OPENAI_API_KEY",
         ProviderKind::OpenRouter => "OPENROUTER_API_KEY",
         ProviderKind::Xai => "XAI_API_KEY",
@@ -6718,60 +6718,63 @@ fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
 
 #[allow(clippy::too_many_lines)]
 fn print_help_to(out: &mut impl Write) -> io::Result<()> {
-    writeln!(out, "claw v{VERSION}")?;
+    writeln!(out, "claw-code v{VERSION}")?;
     writeln!(out)?;
     writeln!(out, "Usage:")?;
     writeln!(
         out,
-        "  claw [--model MODEL] [--allowedTools TOOL[,TOOL...]]"
+        "  claw-code [--model MODEL] [--allowedTools TOOL[,TOOL...]]"
     )?;
     writeln!(out, "      Start the interactive REPL")?;
     writeln!(
         out,
-        "  claw [--model MODEL] [--output-format text|json] prompt TEXT"
+        "  claw-code [--model MODEL] [--output-format text|json] prompt TEXT"
     )?;
     writeln!(out, "      Send one prompt and exit")?;
     writeln!(
         out,
-        "  claw [--model MODEL] [--output-format text|json] TEXT"
+        "  claw-code [--model MODEL] [--output-format text|json] TEXT"
     )?;
     writeln!(out, "      Shorthand non-interactive prompt mode")?;
     writeln!(
         out,
-        "  claw --resume [SESSION.jsonl|session-id|latest] [/status] [/compact] [...]"
+        "  claw-code --resume [SESSION.jsonl|session-id|latest] [/status] [/compact] [...]"
     )?;
     writeln!(
         out,
         "      Inspect or maintain a saved session without entering the REPL"
     )?;
-    writeln!(out, "  claw help")?;
+    writeln!(out, "  claw-code help")?;
     writeln!(out, "      Alias for --help")?;
-    writeln!(out, "  claw version")?;
+    writeln!(out, "  claw-code version")?;
     writeln!(out, "      Alias for --version")?;
-    writeln!(out, "  claw status")?;
+    writeln!(out, "  claw-code status")?;
     writeln!(
         out,
         "      Show workspace status, origin/main freshness, active worktrees, and recent commits"
     )?;
-    writeln!(out, "  claw config show")?;
+    writeln!(out, "  claw-code config show")?;
     writeln!(out, "      Print the merged runtime config as JSON")?;
-    writeln!(out, "  claw hook list")?;
+    writeln!(out, "  claw-code hook list")?;
     writeln!(
         out,
         "      Show registered hooks and whether they are enabled"
     )?;
-    writeln!(out, "  claw sandbox")?;
+    writeln!(out, "  claw-code sandbox")?;
     writeln!(out, "      Show the current sandbox isolation snapshot")?;
-    writeln!(out, "  claw dump-manifests")?;
-    writeln!(out, "  claw bootstrap-plan")?;
-    writeln!(out, "  claw agents")?;
-    writeln!(out, "  claw mcp")?;
-    writeln!(out, "  claw skills")?;
-    writeln!(out, "  claw system-prompt [--cwd PATH] [--date YYYY-MM-DD]")?;
-    writeln!(out, "  claw login")?;
-    writeln!(out, "  claw logout")?;
-    writeln!(out, "  claw init")?;
-    writeln!(out, "  claw branch delete")?;
+    writeln!(out, "  claw-code dump-manifests")?;
+    writeln!(out, "  claw-code bootstrap-plan")?;
+    writeln!(out, "  claw-code agents")?;
+    writeln!(out, "  claw-code mcp")?;
+    writeln!(out, "  claw-code skills")?;
+    writeln!(
+        out,
+        "  claw-code system-prompt [--cwd PATH] [--date YYYY-MM-DD]"
+    )?;
+    writeln!(out, "  claw-code login")?;
+    writeln!(out, "  claw-code logout")?;
+    writeln!(out, "  claw-code init")?;
+    writeln!(out, "  claw-code branch delete")?;
     writeln!(
         out,
         "      Delete merged local git branches except the current/default worktree branches"
@@ -6810,6 +6813,12 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
         "  Non-interactive runs require `--model` or a project/user `model` setting."
     )?;
     writeln!(out)?;
+    writeln!(out, "Compatibility alias:")?;
+    writeln!(
+        out,
+        "  `claw` remains available as a compatibility alias for `claw-code`"
+    )?;
+    writeln!(out)?;
     writeln!(out, "Interactive slash commands:")?;
     writeln!(out, "{}", render_slash_command_help())?;
     writeln!(out)?;
@@ -6837,28 +6846,31 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
         "  Use /session list in the REPL to browse managed sessions"
     )?;
     writeln!(out, "Examples:")?;
-    writeln!(out, "  claw --model claude-opus \"summarize this repo\"")?;
     writeln!(
         out,
-        "  claw --model sonnet --output-format json prompt \"explain src/main.rs\""
+        "  claw-code --model claude-opus \"summarize this repo\""
     )?;
     writeln!(
         out,
-        "  claw --model sonnet --allowedTools read,glob \"summarize Cargo.toml\""
+        "  claw-code --model sonnet --output-format json prompt \"explain src/main.rs\""
     )?;
-    writeln!(out, "  claw --resume {LATEST_SESSION_REFERENCE}")?;
     writeln!(
         out,
-        "  claw --resume {LATEST_SESSION_REFERENCE} /status /diff /export notes.txt"
+        "  claw-code --model sonnet --allowedTools read,glob \"summarize Cargo.toml\""
     )?;
-    writeln!(out, "  claw config show")?;
-    writeln!(out, "  claw hook list")?;
-    writeln!(out, "  claw branch delete")?;
-    writeln!(out, "  claw agents")?;
-    writeln!(out, "  claw mcp show my-server")?;
-    writeln!(out, "  claw /skills")?;
-    writeln!(out, "  claw login")?;
-    writeln!(out, "  claw init")?;
+    writeln!(out, "  claw-code --resume {LATEST_SESSION_REFERENCE}")?;
+    writeln!(
+        out,
+        "  claw-code --resume {LATEST_SESSION_REFERENCE} /status /diff /export notes.txt"
+    )?;
+    writeln!(out, "  claw-code config show")?;
+    writeln!(out, "  claw-code hook list")?;
+    writeln!(out, "  claw-code branch delete")?;
+    writeln!(out, "  claw-code agents")?;
+    writeln!(out, "  claw-code mcp show my-server")?;
+    writeln!(out, "  claw-code /skills")?;
+    writeln!(out, "  claw-code login")?;
+    writeln!(out, "  claw-code init")?;
     Ok(())
 }
 
@@ -6877,8 +6889,7 @@ mod tests {
         format_model_report, format_model_switch_report, format_permissions_report,
         format_permissions_switch_report, format_pr_report, format_resume_report,
         format_status_report, format_tool_call_start, format_tool_result, format_ultraplan_report,
-        format_unknown_slash_command, format_unknown_slash_command_message,
-        format_unknown_slash_command_message, git_ref_exists_in, normalize_permission_mode,
+        format_unknown_slash_command, format_unknown_slash_command_message, git_ref_exists_in,
         normalize_permission_mode, openrouter_page_count, openrouter_page_model_indices,
         parse_args, parse_git_status_branch, parse_git_status_metadata_for,
         parse_git_workspace_summary, parse_git_worktrees, parse_hook_args, parse_recent_commits,
@@ -7414,12 +7425,12 @@ mod tests {
     fn branch_subcommand_requires_delete_action() {
         let usage_error =
             parse_args(&["branch".to_string()]).expect_err("branch should require an action");
-        assert!(usage_error.contains("Usage: claw branch delete"));
+        assert!(usage_error.contains("Usage: claw-code branch delete"));
 
         let unknown_error = parse_args(&["branch".to_string(), "prune".to_string()])
             .expect_err("unknown branch action should fail");
         assert!(unknown_error.contains("unknown branch action: prune"));
-        assert!(unknown_error.contains("Usage: claw branch delete"));
+        assert!(unknown_error.contains("Usage: claw-code branch delete"));
     }
 
     #[test]
@@ -7431,7 +7442,7 @@ mod tests {
         );
 
         let error = parse_args(&["config".to_string()]).expect_err("missing action should fail");
-        assert!(error.contains("Usage: claw config show"));
+        assert!(error.contains("Usage: claw-code config show"));
     }
 
     #[test]
@@ -7442,11 +7453,11 @@ mod tests {
         );
 
         let error = parse_args(&["hook".to_string()]).expect_err("missing action should fail");
-        assert!(error.contains("Usage: claw hook list"));
+        assert!(error.contains("Usage: claw-code hook list"));
 
         let error = parse_hook_args(&["run".to_string()]).expect_err("unknown action should fail");
         assert!(error.contains("unknown hook action: run"));
-        assert!(error.contains("Usage: claw hook list"));
+        assert!(error.contains("Usage: claw-code hook list"));
     }
 
     #[test]
@@ -7538,7 +7549,7 @@ mod tests {
         let error = parse_args(&["/status".to_string()])
             .expect_err("/status should remain REPL-only when invoked directly");
         assert!(error.contains("interactive-only"));
-        assert!(error.contains("claw --resume SESSION.jsonl /status"));
+        assert!(error.contains("claw-code --resume SESSION.jsonl /status"));
     }
 
     #[test]
@@ -7628,7 +7639,7 @@ mod tests {
         let error = parse_args(&["--resum".to_string()]).expect_err("unknown option should fail");
         assert!(error.contains("unknown option: --resum"));
         assert!(error.contains("Did you mean --resume?"));
-        assert!(error.contains("claw --help"));
+        assert!(error.contains("claw-code --help"));
     }
 
     #[test]
@@ -7892,16 +7903,17 @@ mod tests {
         let mut help = Vec::new();
         print_help_to(&mut help).expect("help should render");
         let help = String::from_utf8(help).expect("help should be utf8");
-        assert!(help.contains("claw help"));
-        assert!(help.contains("claw version"));
-        assert!(help.contains("claw status"));
-        assert!(help.contains("claw hook list"));
-        assert!(help.contains("claw sandbox"));
-        assert!(help.contains("claw init"));
-        assert!(help.contains("claw agents"));
-        assert!(help.contains("claw mcp"));
-        assert!(help.contains("claw skills"));
-        assert!(help.contains("claw /skills"));
+        assert!(help.contains("claw-code help"));
+        assert!(help.contains("claw-code version"));
+        assert!(help.contains("claw-code status"));
+        assert!(help.contains("claw-code hook list"));
+        assert!(help.contains("claw-code sandbox"));
+        assert!(help.contains("claw-code init"));
+        assert!(help.contains("claw-code agents"));
+        assert!(help.contains("claw-code mcp"));
+        assert!(help.contains("claw-code skills"));
+        assert!(help.contains("claw-code /skills"));
+        assert!(help.contains("`claw` remains available as a compatibility alias"));
     }
 
     #[test]
@@ -8527,13 +8539,13 @@ UU conflicted.rs",
         let mut help = Vec::new();
         print_help_to(&mut help).expect("help should render");
         let help = String::from_utf8(help).expect("help should be utf8");
-        assert!(help.contains("claw config show"));
-        assert!(help.contains("claw hook list"));
-        assert!(help.contains("claw branch delete"));
-        assert!(help.contains("claw --resume [SESSION.jsonl|session-id|latest]"));
+        assert!(help.contains("claw-code config show"));
+        assert!(help.contains("claw-code hook list"));
+        assert!(help.contains("claw-code branch delete"));
+        assert!(help.contains("claw-code --resume [SESSION.jsonl|session-id|latest]"));
         assert!(help.contains("Use `latest` with --resume, /resume, or /session switch"));
-        assert!(help.contains("claw --resume latest"));
-        assert!(help.contains("claw --resume latest /status /diff /export notes.txt"));
+        assert!(help.contains("claw-code --resume latest"));
+        assert!(help.contains("claw-code --resume latest /status /diff /export notes.txt"));
     }
 
     #[test]
@@ -8642,7 +8654,7 @@ UU conflicted.rs",
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let rendered = crate::init::render_init_claude_md(&workspace_root);
+        let rendered = super::init::render_init_claude_md(&workspace_root);
         assert!(rendered.contains("# CLAUDE.md"));
         assert!(rendered.contains("cargo clippy --workspace --all-targets -- -D warnings"));
     }
@@ -8837,8 +8849,8 @@ UU conflicted.rs",
             "reading src/main.rs"
         );
         assert!(
-            describe_tool_progress("bash", r#"{"command":"cargo test -p rusty-claude-cli"}"#)
-                .contains("cargo test -p rusty-claude-cli")
+            describe_tool_progress("bash", r#"{"command":"cargo test -p claw-code"}"#)
+                .contains("cargo test -p claw-code")
         );
         assert_eq!(
             describe_tool_progress("grep_search", r#"{"pattern":"ultraplan","path":"rust"}"#),

@@ -4,27 +4,86 @@ A high-performance Rust rewrite of the Claw Code CLI agent harness. Built for sp
 
 For a task-oriented guide with copy/paste examples, see [`../USAGE.md`](../USAGE.md).
 
+## Install
+
+Install the CLI globally from `main` with Cargo:
+
+```bash
+cargo install --git https://github.com/ultraworkers/claw-code claw-code --locked
+```
+
+After installation, start it from any project with:
+
+```bash
+claw-code
+```
+
+The install includes the primary `claw-code` binary and the legacy `claw` compatibility alias.
+
+### Global Setup
+
+What must be true for the global workflow to work:
+
+1. Cargo installs the executable into its global bin directory.
+2. Your shell can find that directory through `PATH`.
+3. `claw-code` loads auth from env vars or saved credentials.
+4. Project-local config can still live beside your code in `.claw.json` or `.claw/settings.json`.
+
+Cargo's default global bin directory is:
+
+- Windows: `%USERPROFILE%\.cargo\bin`
+- macOS/Linux: `~/.cargo/bin`
+
+If `claw-code` is not found after install, add that directory to `PATH` and restart your shell.
+
+Typical first-run flow:
+
+```bash
+claw-code login
+claw-code
+```
+
+Update an existing install with:
+
+```bash
+cargo install --git https://github.com/ultraworkers/claw-code claw-code --locked --force
+```
+
+Or use environment variables instead:
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+claw-code
+```
+
+Once installed, the intended model is:
+
+- global auth and user-level state live under `~/.claw/`
+- repo-level defaults live in `.claw.json`
+- repo-local overrides live in `.claw/settings.json`
+- sessions stay inside the project under `.claw/sessions/`
+
 ## Quick Start
 
 ```bash
 # Inspect available commands
 cd rust/
-cargo run -p rusty-claude-cli -- --help
+cargo run -p claw-code --bin claw-code -- --help
 
 # Build the workspace
 cargo build --workspace
 
 # Run the interactive REPL
-cargo run -p rusty-claude-cli -- --model claude-opus-4-6
+cargo run -p claw-code --bin claw-code -- --model claude-opus-4-6
 
 # One-shot prompt
-cargo run -p rusty-claude-cli -- prompt "explain this codebase"
+cargo run -p claw-code --bin claw-code -- prompt "explain this codebase"
 
 # JSON output for automation
-cargo run -p rusty-claude-cli -- --output-format json prompt "summarize src/main.rs"
+cargo run -p claw-code --bin claw-code -- --output-format json prompt "summarize src/main.rs"
 
 # Inspect registered hooks and whether they are enabled
-cargo run -p rusty-claude-cli -- hook list
+cargo run -p claw-code --bin claw-code -- hook list
 ```
 
 ### Simplest Windows Launcher
@@ -42,7 +101,7 @@ On first run it will:
 3. Offer Claude browser login when you choose Anthropic.
 4. Start the Rust CLI so you can pick the model next.
 
-The launcher stores user-level provider credentials under `~/.claw-code/` and keeps the model
+The launcher stores user-level provider credentials under `~/.claw/` and keeps the model
 selection interactive by clearing any saved user-level default model before launch. Workspace
 `.claw/settings.json` still wins if that project pins a model on purpose.
 
@@ -104,7 +163,7 @@ powershell -ExecutionPolicy Bypass -File .\start-openrouter.ps1
 Or authenticate via OAuth and let the CLI persist credentials locally:
 
 ```bash
-cargo run -p rusty-claude-cli -- login
+cargo run -p claw-code --bin claw-code -- login
 ```
 
 ## Mock parity harness
@@ -156,7 +215,7 @@ Primary artifacts:
 | Todo tracking | ✅ |
 | Notebook editing | ✅ |
 | CLAUDE.md / project memory | ✅ |
-| Config file hierarchy (.claude.json) | ✅ |
+| Config file hierarchy (.claw.json / .claw/settings.json) | ✅ |
 | Permission system | ✅ |
 | MCP server lifecycle | ✅ |
 | Session persistence + resume | ✅ |
@@ -183,7 +242,7 @@ Short names resolve to the latest model versions:
 ## CLI Flags
 
 ```
-claw [OPTIONS] [COMMAND]
+claw-code [OPTIONS] [COMMAND]
 
 Options:
   --model MODEL                    Override the active model
@@ -207,7 +266,7 @@ Commands:
   system-prompt      Render the assembled system prompt
 ```
 
-For the current canonical help text, run `cargo run -p rusty-claude-cli -- --help`.
+For the current canonical help text, run `cargo run -p claw-code --bin claw-code -- --help`.
 
 ## Slash Commands (REPL)
 
@@ -245,7 +304,7 @@ rust/
     ├── mock-anthropic-service/ # Deterministic local Anthropic-compatible mock
     ├── plugins/            # Plugin registry and hook wiring primitives
     ├── runtime/            # Session, config, permissions, MCP, prompts
-    ├── rusty-claude-cli/   # Main CLI binary (`claw`)
+    ├── rusty-claude-cli/   # Source folder for the `claw-code` package (`claw` alias included)
     ├── telemetry/          # Session tracing and usage telemetry types
     └── tools/              # Built-in tool implementations
 ```
@@ -258,7 +317,7 @@ rust/
 - **mock-anthropic-service** — Deterministic `/v1/messages` mock for CLI parity tests and local harness runs
 - **plugins** — Plugin metadata, registries, and hook integration surfaces
 - **runtime** — `ConversationRuntime` agentic loop, `ConfigLoader` hierarchy, `Session` persistence, permission policy, MCP client, system prompt assembly, usage tracking
-- **rusty-claude-cli** — REPL, one-shot prompt, streaming display, tool call rendering, CLI argument parsing
+- **claw-code** — REPL, one-shot prompt, streaming display, tool call rendering, CLI argument parsing
 - **telemetry** — Session trace events and supporting telemetry payloads
 - **tools** — Tool specs + execution: Bash, ReadFile, WriteFile, EditFile, GlobSearch, GrepSearch, WebSearch, WebFetch, Agent, TodoWrite, NotebookEdit, Skill, ToolSearch, REPL runtimes
 
@@ -266,7 +325,8 @@ rust/
 
 - **~20K lines** of Rust
 - **9 crates** in workspace
-- **Binary name:** `claw`
+- **Primary binary:** `claw-code`
+- **Compatibility alias:** `claw`
 - **Startup model:** interactive provider/model prompt when unset
 - **Default permissions:** `danger-full-access`
 

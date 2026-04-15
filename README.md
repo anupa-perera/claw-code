@@ -32,6 +32,27 @@
 
 > [!IMPORTANT]
 > The active Rust workspace now lives in [`rust/`](./rust). Start with [`USAGE.md`](./USAGE.md) for build, auth, CLI, session, and parity-harness workflows, then use [`rust/README.md`](./rust/README.md) for crate-level details.
+>
+> Install the global CLI from `main` with Cargo:
+> `cargo install --git https://github.com/ultraworkers/claw-code claw-code --locked`
+
+That installs the primary `claw-code` executable and the compatibility alias `claw`.
+
+To use it globally:
+
+- install Rust and Cargo
+- make sure Cargo's bin directory is on your `PATH`
+- run `claw-code` from any project directory
+- authenticate with `claw-code login` or provide a provider API key through env vars
+
+Cargo's default global bin directory is:
+
+- Windows: `%USERPROFILE%\.cargo\bin`
+- macOS/Linux: `~/.cargo/bin`
+
+To update an existing global install:
+
+`cargo install --git https://github.com/ultraworkers/claw-code claw-code --locked --force`
 
 > Want the bigger idea behind this repo? Read [`PHILOSOPHY.md`](./PHILOSOPHY.md) and Sigrid Jin's public explanation: https://x.com/realsigridjin/status/2039472968624185713
 

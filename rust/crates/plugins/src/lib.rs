@@ -1031,11 +1031,6 @@ impl PluginManager {
     }
 
     #[must_use]
-    pub fn bundled_root() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("bundled")
-    }
-
-    #[must_use]
     pub fn install_root(&self) -> PathBuf {
         self.config
             .install_root
@@ -1350,11 +1345,7 @@ impl PluginManager {
     }
 
     fn sync_bundled_plugins(&self) -> Result<(), PluginError> {
-        let bundled_root = self
-            .config
-            .bundled_root
-            .clone()
-            .unwrap_or_else(Self::bundled_root);
+        let bundled_root = self.default_bundled_root()?;
         let bundled_plugins = discover_plugin_dirs(&bundled_root)?;
         let mut registry = self.load_registry()?;
         let mut changed = false;
@@ -1431,6 +1422,16 @@ impl PluginManager {
         }
 
         Ok(())
+    }
+
+    fn default_bundled_root(&self) -> Result<PathBuf, PluginError> {
+        if let Some(path) = &self.config.bundled_root {
+            return Ok(path.clone());
+        }
+
+        let bundled_root = self.config.config_home.join("plugins").join("bundled");
+        materialize_embedded_bundled_plugins(&bundled_root)?;
+        Ok(bundled_root)
     }
 
     fn is_enabled(&self, metadata: &PluginMetadata) -> bool {
@@ -2142,6 +2143,56 @@ fn sanitize_plugin_id(plugin_id: &str) -> String {
             other => other,
         })
         .collect()
+}
+
+fn materialize_embedded_bundled_plugins(root: &Path) -> Result<(), PluginError> {
+    write_embedded_bundled_file(
+        root,
+        "example-bundled/.claude-plugin/plugin.json",
+        include_str!("../bundled/example-bundled/.claude-plugin/plugin.json"),
+    )?;
+    write_embedded_bundled_file(
+        root,
+        "example-bundled/hooks/pre.sh",
+        include_str!("../bundled/example-bundled/hooks/pre.sh"),
+    )?;
+    write_embedded_bundled_file(
+        root,
+        "example-bundled/hooks/post.sh",
+        include_str!("../bundled/example-bundled/hooks/post.sh"),
+    )?;
+    write_embedded_bundled_file(
+        root,
+        "sample-hooks/.claude-plugin/plugin.json",
+        include_str!("../bundled/sample-hooks/.claude-plugin/plugin.json"),
+    )?;
+    write_embedded_bundled_file(
+        root,
+        "sample-hooks/hooks/pre.sh",
+        include_str!("../bundled/sample-hooks/hooks/pre.sh"),
+    )?;
+    write_embedded_bundled_file(
+        root,
+        "sample-hooks/hooks/post.sh",
+        include_str!("../bundled/sample-hooks/hooks/post.sh"),
+    )?;
+    Ok(())
+}
+
+fn write_embedded_bundled_file(
+    bundled_root: &Path,
+    relative_path: &str,
+    contents: &str,
+) -> Result<(), PluginError> {
+    let path = bundled_root.join(relative_path);
+    if path.exists() && fs::read_to_string(&path).is_ok_and(|existing| existing == contents) {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, contents)?;
+    Ok(())
 }
 
 fn describe_install_source(source: &PluginInstallSource) -> String {

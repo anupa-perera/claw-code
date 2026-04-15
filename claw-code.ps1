@@ -18,10 +18,17 @@ if ($null -eq $ClawArgs) {
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $manifestPath = Join-Path $repoRoot "rust\Cargo.toml"
 $workspaceRoot = (Get-Location).Path
-$configHome = if ([string]::IsNullOrWhiteSpace($env:CLAW_CODE_HOME)) {
+$legacyConfigHome = if ([string]::IsNullOrWhiteSpace($env:CLAW_CODE_HOME)) {
     Join-Path $HOME ".claw-code"
 } else {
     $env:CLAW_CODE_HOME
+}
+$configHome = if (-not [string]::IsNullOrWhiteSpace($env:CLAW_CONFIG_HOME)) {
+    $env:CLAW_CONFIG_HOME
+} elseif (-not [string]::IsNullOrWhiteSpace($env:CLAW_CODE_HOME)) {
+    $env:CLAW_CODE_HOME
+} else {
+    Join-Path $HOME ".claw"
 }
 $launcherStatePath = Join-Path $configHome "provider-auth.json"
 $runtimeCredentialsPath = Join-Path $configHome "credentials.json"
@@ -280,6 +287,26 @@ function Get-LauncherState {
     return $state
 }
 
+function Sync-LegacyConfigHome {
+    if ($legacyConfigHome -eq $configHome) {
+        return
+    }
+
+    if (-not (Test-Path $legacyConfigHome)) {
+        return
+    }
+
+    New-Item -ItemType Directory -Force -Path $configHome | Out-Null
+
+    foreach ($fileName in @("provider-auth.json", "credentials.json", "settings.json")) {
+        $legacyPath = Join-Path $legacyConfigHome $fileName
+        $currentPath = Join-Path $configHome $fileName
+        if ((Test-Path $legacyPath) -and -not (Test-Path $currentPath)) {
+            Copy-Item -Path $legacyPath -Destination $currentPath
+        }
+    }
+}
+
 function Save-LauncherState {
     param(
         [Parameter(Mandatory = $true)]
@@ -477,7 +504,7 @@ function Invoke-RustCli {
         $Args = @()
     }
 
-    & cargo run --manifest-path $manifestPath -p rusty-claude-cli -- @Args
+    & cargo run --manifest-path $manifestPath -p claw-code --bin claw-code -- @Args
 }
 
 function Ensure-ApiKeyCredential {
@@ -719,6 +746,7 @@ function Get-WorkspacePinnedModel {
 
 Ensure-DeveloperEnvironment
 New-Item -ItemType Directory -Force -Path $configHome | Out-Null
+Sync-LegacyConfigHome
 $env:CLAW_CONFIG_HOME = $configHome
 
 if ($ResetAuth) {

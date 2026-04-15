@@ -3040,7 +3040,7 @@ fn render_agents_usage(unexpected: Option<&str>) -> String {
     let mut lines = vec![
         "Agents".to_string(),
         "  Usage            /agents [list|help]".to_string(),
-        "  Direct CLI       claw agents".to_string(),
+        "  Direct CLI       claw-code agents".to_string(),
         "  Sources          .codex/agents, .claude/agents, $CODEX_HOME/agents".to_string(),
     ];
     if let Some(args) = unexpected {
@@ -3053,7 +3053,7 @@ fn render_skills_usage(unexpected: Option<&str>) -> String {
     let mut lines = vec![
         "Skills".to_string(),
         "  Usage            /skills [list|install <path>|help]".to_string(),
-        "  Direct CLI       claw skills [list|install <path>|help]".to_string(),
+        "  Direct CLI       claw-code skills [list|install <path>|help]".to_string(),
         "  Install root     $CODEX_HOME/skills or ~/.codex/skills".to_string(),
         "  Sources          .codex/skills, .claude/skills, legacy /commands".to_string(),
     ];
@@ -3067,7 +3067,7 @@ fn render_mcp_usage(unexpected: Option<&str>) -> String {
     let mut lines = vec![
         "MCP".to_string(),
         "  Usage            /mcp [list|show <server>|help]".to_string(),
-        "  Direct CLI       claw mcp [list|show <server>|help]".to_string(),
+        "  Direct CLI       claw-code mcp [list|show <server>|help]".to_string(),
         "  Sources          .claw/settings.json, .claw/settings.local.json".to_string(),
     ];
     if let Some(args) = unexpected {
@@ -4001,7 +4001,7 @@ mod tests {
         let agents_help =
             super::handle_agents_slash_command(Some("help"), &cwd).expect("agents help");
         assert!(agents_help.contains("Usage            /agents [list|help]"));
-        assert!(agents_help.contains("Direct CLI       claw agents"));
+        assert!(agents_help.contains("Direct CLI       claw-code agents"));
 
         let agents_unexpected =
             super::handle_agents_slash_command(Some("show planner"), &cwd).expect("agents usage");
@@ -4026,7 +4026,7 @@ mod tests {
 
         let help = super::handle_mcp_slash_command(Some("help"), &cwd).expect("mcp help");
         assert!(help.contains("Usage            /mcp [list|show <server>|help]"));
-        assert!(help.contains("Direct CLI       claw mcp [list|show <server>|help]"));
+        assert!(help.contains("Direct CLI       claw-code mcp [list|show <server>|help]"));
 
         let unexpected =
             super::handle_mcp_slash_command(Some("show alpha beta"), &cwd).expect("mcp usage");

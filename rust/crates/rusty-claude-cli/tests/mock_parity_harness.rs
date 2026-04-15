@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
@@ -301,7 +303,7 @@ struct ScenarioReport {
 }
 
 fn run_case(case: ScenarioCase, workspace: &HarnessWorkspace, base_url: &str) -> ScenarioRun {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_claw"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_claw-code"));
     command
         .current_dir(&workspace.root)
         .env_clear()
@@ -419,11 +421,7 @@ fn prepare_plugin_fixture(workspace: &HarnessWorkspace) {
         "#!/bin/sh\nINPUT=$(cat)\nprintf '{\"plugin\":\"%s\",\"tool\":\"%s\",\"input\":%s}\\n' \"$CLAWD_PLUGIN_ID\" \"$CLAWD_TOOL_NAME\" \"$INPUT\"\n",
     )
     .expect("plugin script should write");
-    let mut permissions = fs::metadata(&script_path)
-        .expect("plugin script metadata")
-        .permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&script_path, permissions).expect("plugin script should be executable");
+    make_script_executable(&script_path);
 
     fs::write(
         manifest_dir.join("plugin.json"),
@@ -465,6 +463,18 @@ fn prepare_plugin_fixture(workspace: &HarnessWorkspace) {
     )
     .expect("plugin settings should write");
 }
+
+#[cfg(unix)]
+fn make_script_executable(path: &Path) {
+    let mut permissions = fs::metadata(path)
+        .expect("plugin script metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).expect("plugin script should be executable");
+}
+
+#[cfg(not(unix))]
+fn make_script_executable(_: &Path) {}
 
 fn assert_streaming_text(_: &HarnessWorkspace, run: &ScenarioRun) {
     assert_eq!(

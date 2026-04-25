@@ -8,23 +8,29 @@ A maintained fork of the Claw Code agent harness with an installable Rust CLI on
 
 The active product in this repo is the Rust workspace in [`rust/`](./rust). The main outcome of this fork is that the CLI can now be installed globally and used from any project as `claw-code`, while still keeping `claw` as a compatibility alias.
 
-The biggest end-user contribution of this fork is making OpenRouter a first-class path for using the CLI with one API key across many model providers, including lower-cost and free-tier model options when OpenRouter makes them available.
+The major additions in this fork are making the Rust CLI globally installable, making OpenRouter a first-class provider path, and streamlining provider onboarding so the installed product can be used directly from any project.
 
 ## What This Fork Achieves
 
-- makes OpenRouter the most important new provider path in this fork
 - packages the Rust CLI as a real installable command
 - standardizes the public command name as `claw-code`
 - keeps `claw` available as a compatibility alias
 - makes OpenRouter a first-class provider for lower-cost and free-tier model access
+- adds provider-aware login and first-run onboarding
 - aligns user and project state around `.claw`
 - supports running from an installed binary instead of requiring a repo checkout
 - keeps the Windows launcher and onboarding flow working with the packaged CLI
 - preserves parity and test coverage around sessions, commands, and bundled plugins
 
-## Biggest Addition: OpenRouter
+## Major Additions
 
-The biggest practical addition in this fork is the OpenRouter path.
+This fork is not just one change. It is a set of product changes that make the CLI easier to install, cheaper to use, and simpler to start with.
+
+### 1. Installable Global CLI Package
+
+The Rust CLI can now be installed globally from `main` and used from any project as `claw-code`, while still keeping `claw` as a compatibility alias. That changes the product from a repo-bound tool into something people can install and actually use as a normal CLI.
+
+### 2. OpenRouter as a First-Class Provider
 
 With `OPENROUTER_API_KEY` or `claw-code login --provider openrouter`, you can use the CLI without locking yourself into a single premium provider account. That matters if you are:
 
@@ -35,7 +41,13 @@ With `OPENROUTER_API_KEY` or `claw-code login --provider openrouter`, you can us
 
 OpenRouter is useful here because one key can expose many model families through one provider surface, and it often includes free-tier models or very low-cost models alongside paid options. Availability and rate limits can change on the OpenRouter side, so it is best to think of this as access to free-tier and budget-friendly options when available, not as a guarantee that every model is always free.
 
-Packaging the Rust CLI for global install is a big part of this fork too, but that install story mainly matters because it makes the OpenRouter workflow usable from any project without needing a repo checkout or a premium-provider-first setup.
+### 3. Provider-Aware Login and First-Run Onboarding
+
+The CLI now supports provider-aware setup for Anthropic, OpenAI, OpenRouter, and xAI. On a fresh install, `claw-code` can guide the user through provider selection, credential setup, and model selection directly from the main entrypoint instead of forcing a separate setup step first.
+
+### 4. Cleaner Installed Product Identity
+
+This fork also cleans up the installed-product story around `.claw`, keeps compatibility with the older `claw` command, and makes the installed binary work without requiring a repo checkout layout.
 
 ## Install
 

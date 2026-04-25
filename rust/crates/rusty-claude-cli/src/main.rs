@@ -59,6 +59,7 @@ use tools::{GlobalToolRegistry, RuntimeToolDefinition, ToolSearchOutput};
 const DEFAULT_MODEL: &str = "claude-opus-4-6";
 const UNCONFIGURED_MODEL_LABEL: &str = "unconfigured (choose on startup)";
 const DEFAULT_DATE: &str = "2026-03-31";
+const FORK_AUTHOR: &str = "@anupa-perera";
 const DEFAULT_OAUTH_CALLBACK_PORT: u16 = 4545;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const BUILD_TARGET: Option<&str> = option_env!("TARGET");
@@ -3453,7 +3454,7 @@ impl LiveCli {
 ██║     ██║     ███████║██║ █╗ ██║\n\
 ██║     ██║     ██╔══██║██║███╗██║\n\
 ╚██████╗███████╗██║  ██║╚███╔███╔╝\n\
- ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝\x1b[0m \x1b[38;5;208mCode\x1b[0m 🦞\n\n\
+ ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝\x1b[0m \x1b[38;5;208mCode\x1b[0m 🦞 \x1b[2m· an extended fork by {FORK_AUTHOR}\x1b[0m\n\n\
   \x1b[2mModel\x1b[0m            {}\n\
   \x1b[2mPermissions\x1b[0m      {}\n\
   \x1b[2mBranch\x1b[0m           {}\n\
@@ -7377,7 +7378,8 @@ mod tests {
         write_mcp_server_fixture, CliAction, CliOutputFormat, CliToolExecutor, GitBranchFreshness,
         GitCommitEntry, GitWorkspaceSummary, GitWorktreeEntry, InternalPromptProgressEvent,
         InternalPromptProgressState, LiveCli, LoginAuthMode, ModelSource, OpenRouterModel,
-        ProviderKind, SlashCommand, StatusUsage, DEFAULT_MODEL, UNCONFIGURED_MODEL_LABEL,
+        ProviderKind, SlashCommand, StatusUsage, DEFAULT_MODEL, FORK_AUTHOR,
+        UNCONFIGURED_MODEL_LABEL,
     };
     use api::{MessageResponse, OutputContentBlock, Usage};
     use plugins::{
@@ -8379,6 +8381,8 @@ mod tests {
 
         assert!(banner.contains("Tab"));
         assert!(banner.contains("workflow completions"));
+        assert!(banner.contains("extended fork by"));
+        assert!(banner.contains(FORK_AUTHOR));
 
         fs::remove_dir_all(root).expect("cleanup temp dir");
         std::env::remove_var("ANTHROPIC_API_KEY");

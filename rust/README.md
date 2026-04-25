@@ -10,6 +10,23 @@ OpenRouter is the headline addition because it gives one key access to many mode
 
 ## Install
 
+Before installing `claw-code`, make sure Rust is installed and `cargo` resolves to a working toolchain.
+
+Recommended setup:
+
+```bash
+rustup default stable
+cargo --version
+rustc --version
+```
+
+If `rustup` says no default toolchain is configured yet, run:
+
+```bash
+rustup toolchain install stable
+rustup default stable
+```
+
 Install the CLI globally from `main` with Cargo:
 
 ```bash

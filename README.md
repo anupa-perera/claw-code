@@ -49,6 +49,23 @@ This fork also cleans up the installed-product story around `.claw`, keeps compa
 
 ## Install
 
+Before installing `claw-code`, install Rust and make sure `cargo` works on your machine.
+
+Recommended setup:
+
+```bash
+rustup default stable
+cargo --version
+rustc --version
+```
+
+If `rustup` says no default toolchain is configured yet, run:
+
+```bash
+rustup toolchain install stable
+rustup default stable
+```
+
 Install from this repository's `main` branch:
 
 ```bash

@@ -12,6 +12,29 @@ If the install succeeded but `claw-code` still does not behave correctly, the pr
 4. hidden API-key paste did not capture any characters
 5. Windows or antivirus is locking the installed exe during uninstall or reinstall
 
+## `cargo install` Fails Because Rust Is Not Set Up Yet
+
+### Symptoms
+
+- `cargo` is not recognized
+- `rustup could not choose a version of cargo to run`
+- `no default toolchain is configured`
+
+### Why it happens
+
+The package is installed with Cargo, so the machine needs a working Rust toolchain before `cargo install` can build anything.
+
+### How to fix it
+
+Install or activate the stable Rust toolchain:
+
+```powershell
+rustup toolchain install stable
+rustup default stable
+cargo --version
+rustc --version
+```
+
 ## `claw-code` Runs the Wrong Thing on Windows
 
 ### Symptoms

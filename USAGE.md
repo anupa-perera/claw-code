@@ -13,6 +13,23 @@ That matters most for:
 
 ## Global install
 
+Before installing `claw-code`, make sure Rust is installed and `cargo` is usable on your machine.
+
+Recommended setup:
+
+```bash
+rustup default stable
+cargo --version
+rustc --version
+```
+
+If `rustup` says no default toolchain is configured yet, run:
+
+```bash
+rustup toolchain install stable
+rustup default stable
+```
+
 If you want the most budget-friendly starting point after install, OpenRouter is usually the best first provider to try:
 
 ```bash

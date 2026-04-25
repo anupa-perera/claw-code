@@ -84,13 +84,16 @@ For install, login, or Windows command-resolution issues, see [`TROUBLESHOOTING.
 
 ## Quick Start
 
-Start the CLI from any project:
+Start the CLI from any project with either command:
 
 ```bash
 claw-code
+claw
 ```
 
-On a fresh install, `claw-code` now handles first-run onboarding inline. If no provider credentials exist yet, it will ask you to choose a provider, collect the credential it needs, then continue straight into model selection and the interactive console.
+`claw-code` is the canonical public command name, and `claw` is the compatibility alias. Both now start the installed product.
+
+On a fresh install, bare `claw-code` or `claw` now handles first-run onboarding inline. If no provider credentials exist yet, it will ask you to choose a provider, collect the credential it needs, then continue straight into model selection and the interactive console.
 
 `claw-code login` is still available as the explicit setup command. It is provider-aware, lets you choose Anthropic, OpenAI, OpenRouter, or xAI, and saves credentials under `~/.claw/` for future runs.
 
@@ -106,6 +109,7 @@ If you want the most budget-friendly path, OpenRouter is usually the best starti
 ```bash
 export OPENROUTER_API_KEY="sk-or-..."
 claw-code
+claw
 ```
 
 Then choose OpenRouter on startup and pick a free-tier or lower-cost model from the catalog.
@@ -115,6 +119,7 @@ Or use environment variables instead:
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
 claw-code
+claw
 ```
 
 Supported environment variables include:

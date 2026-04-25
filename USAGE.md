@@ -17,9 +17,12 @@ If you want the most budget-friendly starting point after install, OpenRouter is
 
 ```bash
 claw-code
+claw
 ```
 
-On a fresh install, bare `claw-code` will now handle provider onboarding inline when no credentials are saved yet. Choose OpenRouter on first run, paste `OPENROUTER_API_KEY`, then continue straight into model selection and the console.
+`claw-code` is the primary command name, and `claw` is the compatibility alias. Both can start the installed product.
+
+On a fresh install, bare `claw-code` or `claw` will now handle provider onboarding inline when no credentials are saved yet. Choose OpenRouter on first run, paste `OPENROUTER_API_KEY`, then continue straight into model selection and the console.
 
 Install from `main`:
 
@@ -51,6 +54,7 @@ Then run the CLI from any project:
 
 ```bash
 claw-code
+claw
 ```
 
 If install, login, or Windows shell behavior does not match expectations, see [`TROUBLESHOOTING.md`](./TROUBLESHOOTING.md).
@@ -59,7 +63,7 @@ If install, login, or Windows shell behavior does not match expectations, see [`
 
 - Rust toolchain with `cargo`
 - One of:
-  - first-run onboarding through bare `claw-code`
+  - first-run onboarding through bare `claw-code` or `claw`
   - `claw-code login` for explicit saved provider setup
   - `ANTHROPIC_API_KEY`
   - `ANTHROPIC_AUTH_TOKEN`

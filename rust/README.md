@@ -29,13 +29,14 @@ cargo uninstall claw-code
 cargo uninstall rusty-claude-cli
 ```
 
-After installation, start it from any project with:
+After installation, start it from any project with either command:
 
 ```bash
 claw-code
+claw
 ```
 
-The install includes the primary `claw-code` binary and the legacy `claw` compatibility alias.
+The install includes the primary `claw-code` binary and the legacy `claw` compatibility alias. Both start the installed product.
 
 ### Global setup model
 
@@ -43,7 +44,7 @@ What must be true for the global workflow to work:
 
 1. Cargo installs the executable into its global bin directory.
 2. Your shell can find that directory through `PATH`.
-3. `claw-code` loads auth from env vars or saved credentials under `~/.claw/`.
+3. `claw-code` or `claw` loads auth from env vars or saved credentials under `~/.claw/`.
 4. Project-local config still lives beside your code in `.claw.json` or `.claw/settings.json`.
 
 Cargo's default global bin directory is:
@@ -59,9 +60,10 @@ Typical first-run flow:
 
 ```bash
 claw-code
+claw
 ```
 
-On a fresh install, bare `claw-code` now owns first-run onboarding. If no provider credentials exist yet, it asks for a provider, captures the needed credential, then continues into model selection and the REPL.
+On a fresh install, bare `claw-code` or `claw` now owns first-run onboarding. If no provider credentials exist yet, it asks for a provider, captures the needed credential, then continues into model selection and the REPL.
 
 Useful direct login flows:
 

@@ -22,7 +22,7 @@ If the install succeeded but `claw-code` still does not behave correctly, the pr
 
 ### Why it happens
 
-On Windows PowerShell, a function or alias named `claw-code` can override the installed binary. A repo-local `claw-code.cmd` can also take precedence when you run commands from inside the checkout.
+On Windows PowerShell, a function or alias named `claw-code` can override the installed binary. A repo-local `claw-code.cmd` can also take precedence when you run commands from inside the checkout. The installed package also provides `claw`, which is often the simplest way to verify that the packaged binary itself works.
 
 ### How to fix it
 
@@ -37,6 +37,7 @@ cd $HOME
 mkdir claw-code-test -ErrorAction SilentlyContinue
 cd claw-code-test
 claw-code --help
+claw --help
 ```
 
 If you need to verify the exact command PowerShell is using:
@@ -134,6 +135,7 @@ Skip saved login and set the environment variable directly:
 ```powershell
 $env:OPENROUTER_API_KEY = "sk-or-..."
 claw-code
+claw
 ```
 
 ## `cargo uninstall claw-code` Fails with `Access is denied`

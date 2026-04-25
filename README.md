@@ -6,8 +6,6 @@
 
 A maintained fork of the Claw Code agent harness with an installable Rust CLI on `main`.
 
-The active product in this repo is the Rust workspace in [`rust/`](./rust). The main outcome of this fork is that the CLI can now be installed globally and used from any project as `claw-code`, while still keeping `claw` as a compatibility alias.
-
 The major additions in this fork are making the Rust CLI globally installable, making OpenRouter a first-class provider path, and streamlining provider onboarding so the installed product can be used directly from any project.
 
 ## What This Fork Achieves

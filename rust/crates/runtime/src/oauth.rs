@@ -361,8 +361,14 @@ pub fn clear_saved_api_key(provider: SavedApiKeyProvider) -> io::Result<()> {
     if remove_provider {
         providers.remove(provider.key());
     }
+    if providers.is_empty() {
+        root.remove("providers");
+    }
+    if !root.contains_key("providers") && root.keys().all(|key| key == "version") {
+        root.remove("version");
+    }
 
-    write_json_root(&path, &root)
+    write_json_root_or_remove(&path, &root)
 }
 
 pub fn load_oauth_credentials() -> io::Result<Option<OAuthTokenSet>> {
@@ -394,7 +400,7 @@ pub fn clear_oauth_credentials() -> io::Result<()> {
     let path = credentials_path()?;
     let mut root = read_json_root(&path)?;
     root.remove("oauth");
-    write_json_root(&path, &root)
+    write_json_root_or_remove(&path, &root)
 }
 
 pub fn parse_oauth_callback_request_target(target: &str) -> Result<OAuthCallbackParams, String> {
@@ -466,6 +472,18 @@ fn read_json_root(path: &Path) -> io::Result<Map<String, Value>> {
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Map::new()),
         Err(error) => Err(error),
+    }
+}
+
+fn write_json_root_or_remove(path: &Path, root: &Map<String, Value>) -> io::Result<()> {
+    if root.is_empty() {
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        }
+    } else {
+        write_json_root(path, root)
     }
 }
 
@@ -728,6 +746,53 @@ mod tests {
         assert!(saved.contains("\"openrouter\""));
         assert!(saved.contains("\"or-test\""));
         assert!(saved.contains("\"note\": \"keep\""));
+
+        std::env::remove_var("CLAW_CONFIG_HOME");
+        std::fs::remove_dir_all(config_home).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn clearing_last_saved_api_key_removes_provider_auth_file() {
+        let _guard = env_lock();
+        let config_home = temp_config_home();
+        std::env::set_var("CLAW_CONFIG_HOME", &config_home);
+        let path = config_home.join("provider-auth.json");
+        std::fs::create_dir_all(&config_home).expect("create config home");
+
+        save_api_key(SavedApiKeyProvider::OpenRouter, "or-test").expect("save openrouter key");
+        assert!(path.exists());
+
+        clear_saved_api_key(SavedApiKeyProvider::OpenRouter).expect("clear openrouter key");
+        assert!(
+            !path.exists(),
+            "provider-auth.json should be removed when empty"
+        );
+
+        std::env::remove_var("CLAW_CONFIG_HOME");
+        std::fs::remove_dir_all(config_home).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn clearing_last_oauth_credentials_removes_credentials_file() {
+        let _guard = env_lock();
+        let config_home = temp_config_home();
+        std::env::set_var("CLAW_CONFIG_HOME", &config_home);
+        let path = credentials_path().expect("credentials path");
+
+        save_oauth_credentials(&OAuthTokenSet {
+            access_token: "access-token".to_string(),
+            refresh_token: Some("refresh-token".to_string()),
+            expires_at: Some(123),
+            scopes: vec!["scope:a".to_string()],
+        })
+        .expect("save credentials");
+        assert!(path.exists());
+
+        clear_oauth_credentials().expect("clear credentials");
+        assert!(
+            !path.exists(),
+            "credentials.json should be removed when empty"
+        );
 
         std::env::remove_var("CLAW_CONFIG_HOME");
         std::fs::remove_dir_all(config_home).expect("cleanup temp dir");

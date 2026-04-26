@@ -201,6 +201,7 @@ For a fully clean reinstall on Windows:
 ```powershell
 Set-Location $HOME
 Get-Process claw-code, claw -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+claw-code logout
 Remove-Item "$HOME\.claw\provider-auth.json" -Force -ErrorAction SilentlyContinue
 Remove-Item "$HOME\.claw\credentials.json" -Force -ErrorAction SilentlyContinue
 cargo uninstall claw-code
@@ -208,6 +209,8 @@ cargo uninstall rusty-claude-cli
 Remove-Item "$HOME\.cargo\bin\claw-code.exe" -Force -ErrorAction SilentlyContinue
 Remove-Item "$HOME\.cargo\bin\claw.exe" -Force -ErrorAction SilentlyContinue
 ```
+
+`cargo uninstall` only removes the installed package files. If you want saved auth state gone too, run `claw-code logout` or `claw logout` before uninstall. That clears saved provider credentials and the saved startup provider under `~/.claw/`.
 
 Then install either from the local checkout:
 

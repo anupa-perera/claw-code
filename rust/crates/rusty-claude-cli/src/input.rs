@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::io::{self, IsTerminal, Write};
+use std::sync::{Arc, Mutex};
 
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
@@ -10,7 +11,8 @@ use rustyline::hint::Hinter;
 use rustyline::history::DefaultHistory;
 use rustyline::validate::Validator;
 use rustyline::{
-    Cmd, CompletionType, Config, Context, EditMode, Editor, Helper, KeyCode, KeyEvent, Modifiers,
+    Cmd, CompletionType, ConditionalEventHandler, Config, Context, EditMode, Editor, Event,
+    EventContext, EventHandler, ExternalPrinter, Helper, KeyCode, KeyEvent, Modifiers,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,6 +101,39 @@ impl Highlighter for SlashCommandHelper {
 impl Validator for SlashCommandHelper {}
 impl Helper for SlashCommandHelper {}
 
+struct SlashCommandMenuHandler<P: ExternalPrinter + Send> {
+    printer: Mutex<P>,
+    help_text: Arc<str>,
+}
+
+impl<P: ExternalPrinter + Send> SlashCommandMenuHandler<P> {
+    fn new(printer: P, help_text: Arc<str>) -> Self {
+        Self {
+            printer: Mutex::new(printer),
+            help_text,
+        }
+    }
+}
+
+impl<P: ExternalPrinter + Send> ConditionalEventHandler for SlashCommandMenuHandler<P> {
+    fn handle(
+        &self,
+        _evt: &Event,
+        n: rustyline::RepeatCount,
+        _positive: bool,
+        ctx: &EventContext,
+    ) -> Option<Cmd> {
+        if should_trigger_slash_command_menu(ctx.line(), ctx.pos()) {
+            if let Ok(mut printer) = self.printer.lock() {
+                let _ = printer.print(format!("\n{}\n", self.help_text));
+            }
+            return Some(Cmd::SelfInsert(n.max(1), '/'));
+        }
+
+        None
+    }
+}
+
 pub struct LineEditor {
     prompt: String,
     editor: Editor<SlashCommandHelper, DefaultHistory>,
@@ -107,6 +142,15 @@ pub struct LineEditor {
 impl LineEditor {
     #[must_use]
     pub fn new(prompt: impl Into<String>, completions: Vec<String>) -> Self {
+        Self::with_slash_command_menu(prompt, completions, None)
+    }
+
+    #[must_use]
+    pub fn with_slash_command_menu(
+        prompt: impl Into<String>,
+        completions: Vec<String>,
+        slash_help_text: Option<String>,
+    ) -> Self {
         let config = Config::builder()
             .completion_type(CompletionType::List)
             .edit_mode(EditMode::Emacs)
@@ -116,6 +160,17 @@ impl LineEditor {
         editor.set_helper(Some(SlashCommandHelper::new(completions)));
         editor.bind_sequence(KeyEvent(KeyCode::Char('J'), Modifiers::CTRL), Cmd::Newline);
         editor.bind_sequence(KeyEvent(KeyCode::Enter, Modifiers::SHIFT), Cmd::Newline);
+        if let Some(slash_help_text) = slash_help_text.filter(|text| !text.trim().is_empty()) {
+            if let Ok(printer) = editor.create_external_printer() {
+                editor.bind_sequence(
+                    KeyEvent(KeyCode::Char('/'), Modifiers::NONE),
+                    EventHandler::Conditional(Box::new(SlashCommandMenuHandler::new(
+                        printer,
+                        Arc::<str>::from(slash_help_text),
+                    ))),
+                );
+            }
+        }
 
         Self {
             prompt: prompt.into(),
@@ -211,6 +266,10 @@ fn slash_command_prefix(line: &str, pos: usize) -> Option<&str> {
     Some(prefix)
 }
 
+fn should_trigger_slash_command_menu(line: &str, pos: usize) -> bool {
+    line.is_empty() && pos == 0
+}
+
 fn normalize_completions(completions: Vec<String>) -> Vec<String> {
     let mut seen = BTreeSet::new();
     completions
@@ -222,7 +281,9 @@ fn normalize_completions(completions: Vec<String>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{slash_command_prefix, LineEditor, SlashCommandHelper};
+    use super::{
+        should_trigger_slash_command_menu, slash_command_prefix, LineEditor, SlashCommandHelper,
+    };
     use rustyline::completion::Completer;
     use rustyline::highlight::Highlighter;
     use rustyline::history::{DefaultHistory, History};
@@ -238,6 +299,14 @@ mod tests {
         );
         assert_eq!(slash_command_prefix("hello", 5), None);
         assert_eq!(slash_command_prefix("/help", 2), None);
+    }
+
+    #[test]
+    fn triggers_slash_command_menu_only_for_a_fresh_slash() {
+        assert!(should_trigger_slash_command_menu("", 0));
+        assert!(!should_trigger_slash_command_menu("/", 1));
+        assert!(!should_trigger_slash_command_menu("hello", 5));
+        assert!(!should_trigger_slash_command_menu("/status", 7));
     }
 
     #[test]

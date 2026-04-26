@@ -63,9 +63,12 @@ cargo install --git https://github.com/anupa-perera/claw-code claw-code --locked
 If you are replacing an older install cleanly first:
 
 ```bash
+claw-code logout
 cargo uninstall claw-code
 cargo uninstall rusty-claude-cli
 ```
+
+Run `claw-code logout` or `claw logout` first if you want saved provider credentials and the saved startup provider removed from `~/.claw/` before uninstall.
 
 Then run the CLI from any project:
 

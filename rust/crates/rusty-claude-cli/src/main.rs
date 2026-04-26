@@ -822,6 +822,21 @@ fn write_json_object(
     fs::rename(temp_path, path)
 }
 
+fn write_json_object_or_remove(
+    path: &Path,
+    root: &serde_json::Map<String, serde_json::Value>,
+) -> io::Result<()> {
+    if root.is_empty() {
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        }
+    } else {
+        write_json_object(path, root)
+    }
+}
+
 fn save_startup_provider_preference(provider: ProviderKind) -> io::Result<()> {
     let cwd = env::current_dir()?;
     let loader = ConfigLoader::default_for(&cwd);
@@ -840,6 +855,15 @@ fn save_startup_provider_preference(provider: ProviderKind) -> io::Result<()> {
         ),
     );
     write_json_object(&settings_path, &root)
+}
+
+fn clear_startup_provider_preference() -> io::Result<()> {
+    let cwd = env::current_dir()?;
+    let loader = ConfigLoader::default_for(&cwd);
+    let settings_path = loader.config_home().join("settings.json");
+    let mut root = read_json_object(&settings_path)?;
+    root.remove("startupProvider");
+    write_json_object_or_remove(&settings_path, &root)
 }
 
 fn normalize_allowed_tools(values: &[String]) -> Result<Option<AllowedToolSet>, String> {
@@ -1396,7 +1420,8 @@ fn run_logout() -> Result<(), Box<dyn std::error::Error>> {
     clear_saved_api_key(SavedApiKeyProvider::OpenAi)?;
     clear_saved_api_key(SavedApiKeyProvider::OpenRouter)?;
     clear_saved_api_key(SavedApiKeyProvider::Xai)?;
-    println!("Saved provider credentials cleared.");
+    clear_startup_provider_preference()?;
+    println!("Saved provider credentials and startup provider preference cleared.");
     Ok(())
 }
 
@@ -2267,8 +2292,11 @@ fn run_repl(
         permission_mode,
         true,
     )?;
-    let mut editor =
-        input::LineEditor::new("> ", cli.repl_completion_candidates().unwrap_or_default());
+    let mut editor = input::LineEditor::with_slash_command_menu(
+        "> ",
+        cli.repl_completion_candidates().unwrap_or_default(),
+        Some(render_slash_command_help()),
+    );
     println!("{}", cli.startup_banner());
 
     loop {
@@ -3462,7 +3490,7 @@ impl LiveCli {
   \x1b[2mDirectory\x1b[0m        {}\n\
   \x1b[2mSession\x1b[0m          {}\n\
   \x1b[2mAuto-save\x1b[0m        {}\n\n\
-  Type \x1b[1m/help\x1b[0m for commands · \x1b[1m/status\x1b[0m for live context · \x1b[2m/resume latest\x1b[0m jumps back to the newest session · \x1b[1m/diff\x1b[0m then \x1b[1m/commit\x1b[0m to ship · \x1b[2mTab\x1b[0m for workflow completions · \x1b[2mShift+Enter\x1b[0m for newline",
+  Type \x1b[1m/\x1b[0m for slash commands · \x1b[1m/status\x1b[0m for live context · \x1b[2m/resume latest\x1b[0m jumps back to the newest session · \x1b[1m/diff\x1b[0m then \x1b[1m/commit\x1b[0m to ship · \x1b[2mTab\x1b[0m for workflow completions · \x1b[2mShift+Enter\x1b[0m for newline",
             self.model,
             self.permission_mode.as_str(),
             git_branch,
@@ -7246,7 +7274,15 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
         out,
         "  claw-code login [--provider PROVIDER] [--auth api-key|oauth]"
     )?;
+    writeln!(
+        out,
+        "      Save provider credentials for Anthropic, OpenAI, OpenRouter, or xAI"
+    )?;
     writeln!(out, "  claw-code logout")?;
+    writeln!(
+        out,
+        "      Clear saved provider credentials and the saved startup provider"
+    )?;
     writeln!(out, "  claw-code init")?;
     writeln!(out, "  claw-code branch delete")?;
     writeln!(
@@ -7966,6 +8002,38 @@ mod tests {
         )
         .expect("settings should remain valid json");
         assert_eq!(saved["startupProvider"], "openrouter");
+        assert_eq!(saved["model"], "claude-opus-4-6");
+        assert_eq!(saved["hooks"]["PostToolUse"][0], "echo keep");
+
+        std::env::remove_var("CLAW_CONFIG_HOME");
+        let _ = fs::remove_dir_all(workspace);
+        let _ = fs::remove_dir_all(config_home);
+    }
+
+    #[test]
+    fn clearing_startup_provider_preference_preserves_other_user_settings() {
+        let _env_guard = env_lock();
+        let workspace = temp_workspace("clear-startup-provider-workspace");
+        let config_home = temp_workspace("clear-startup-provider-home");
+        fs::create_dir_all(&workspace).expect("workspace should exist");
+        fs::create_dir_all(&config_home).expect("config home should exist");
+        fs::write(
+            config_home.join("settings.json"),
+            r#"{"startupProvider":"openrouter","model":"claude-opus-4-6","hooks":{"PostToolUse":["echo keep"]}}"#,
+        )
+        .expect("seed settings");
+        std::env::set_var("CLAW_CONFIG_HOME", &config_home);
+
+        with_current_dir(&workspace, || {
+            super::clear_startup_provider_preference().expect("startup provider should clear");
+            assert_eq!(super::configured_startup_provider(), None);
+        });
+
+        let saved: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(config_home.join("settings.json")).expect("read settings"),
+        )
+        .expect("settings should remain valid json");
+        assert!(saved.get("startupProvider").is_none());
         assert_eq!(saved["model"], "claude-opus-4-6");
         assert_eq!(saved["hooks"]["PostToolUse"][0], "echo keep");
 

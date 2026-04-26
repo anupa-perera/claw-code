@@ -69,7 +69,6 @@ const PRIMARY_SESSION_EXTENSION: &str = "jsonl";
 const LEGACY_SESSION_EXTENSION: &str = "json";
 const LATEST_SESSION_REFERENCE: &str = "latest";
 const SESSION_REFERENCE_ALIASES: &[&str] = &[LATEST_SESSION_REFERENCE, "last", "recent"];
-const SLASH_COMMAND_PICKER_LIMIT: usize = 12;
 const CLI_OPTION_SUGGESTIONS: &[&str] = &[
     "--help",
     "-h",
@@ -2293,41 +2292,27 @@ fn run_repl(
         permission_mode,
         true,
     )?;
-    let slash_picker_commands = slash_command_picker_commands();
-    let mut editor = input::LineEditor::with_slash_command_menu(
+    let mut editor = input::LineEditor::with_slash_command_picker(
         "> ",
         cli.repl_completion_candidates().unwrap_or_default(),
-        Some(render_slash_command_picker(&slash_picker_commands)),
+        slash_command_picker_entries(),
     );
     println!("{}", cli.startup_banner());
 
     loop {
         editor.set_completions(cli.repl_completion_candidates().unwrap_or_default());
+        editor.set_slash_picker_entries(slash_command_picker_entries());
         match editor.read_line()? {
             input::ReadOutcome::Submit(input) => {
                 let trimmed = input.trim().to_string();
                 if trimmed.is_empty() {
                     continue;
                 }
-                if trimmed == "/" {
-                    continue;
-                }
-                let resolved_trimmed = match resolve_slash_command_picker_selection(
-                    &trimmed,
-                    &slash_picker_commands,
-                ) {
-                    Ok(Some(command)) => command,
-                    Ok(None) => trimmed.clone(),
-                    Err(error) => {
-                        eprintln!("{error}");
-                        continue;
-                    }
-                };
-                if matches!(resolved_trimmed.as_str(), "/exit" | "/quit") {
+                if matches!(trimmed.as_str(), "/exit" | "/quit") {
                     cli.persist_session()?;
                     break;
                 }
-                match SlashCommand::parse(&resolved_trimmed) {
+                match SlashCommand::parse(&trimmed) {
                     Ok(Some(command)) => {
                         if cli.handle_repl_command(command)? {
                             cli.persist_session()?;
@@ -2341,7 +2326,7 @@ fn run_repl(
                     }
                 }
                 editor.push_history(input);
-                cli.run_turn(&resolved_trimmed)?;
+                cli.run_turn(&trimmed)?;
             }
             input::ReadOutcome::Cancel => {}
             input::ReadOutcome::Exit => {
@@ -6535,69 +6520,19 @@ fn slash_command_completion_candidates_with_sessions(
     completions.into_iter().collect()
 }
 
-fn slash_command_picker_commands() -> Vec<String> {
+fn slash_command_picker_entries() -> Vec<input::SlashCommandPickerEntry> {
     slash_command_specs()
         .iter()
-        .take(SLASH_COMMAND_PICKER_LIMIT)
-        .map(|spec| format!("/{}", spec.name))
+        .map(|spec| input::SlashCommandPickerEntry {
+            command: format!("/{}", spec.name),
+            insert_text: match spec.argument_hint {
+                Some(_) => format!("/{} ", spec.name),
+                None => format!("/{}", spec.name),
+            },
+            summary: spec.summary.to_string(),
+            execute_immediately: spec.argument_hint.is_none(),
+        })
         .collect()
-}
-
-fn render_slash_command_picker(commands: &[String]) -> String {
-    let mut lines = vec![
-        "Slash command picker".to_string(),
-        format!(
-            "  Choose           type /1 through /{}, or keep typing after / to filter all {} slash commands",
-            commands.len(),
-            slash_command_specs().len()
-        ),
-        "  Tip              press Tab to complete the current filter, or run /help for the full categorized list"
-            .to_string(),
-        String::new(),
-    ];
-
-    for (index, command) in commands.iter().enumerate() {
-        let summary = command
-            .strip_prefix('/')
-            .and_then(|name| {
-                slash_command_specs()
-                    .iter()
-                    .find(|spec| spec.name.eq_ignore_ascii_case(name))
-            })
-            .map_or("", |spec| spec.summary);
-        lines.push(format!("  {:>2}. {:<18} {}", index + 1, command, summary));
-    }
-
-    lines.join("\n")
-}
-
-fn resolve_slash_command_picker_selection(
-    input: &str,
-    commands: &[String],
-) -> Result<Option<String>, String> {
-    let trimmed = input.trim();
-    let Some(selection) = trimmed.strip_prefix('/') else {
-        return Ok(None);
-    };
-    if selection.is_empty()
-        || !selection
-            .chars()
-            .all(|character| character.is_ascii_digit())
-    {
-        return Ok(None);
-    }
-
-    let index = selection
-        .parse::<usize>()
-        .map_err(|_| "slash command picker selection must be a positive number".to_string())?;
-    if index == 0 || index > commands.len() {
-        return Err(format!(
-            "slash command picker selections support /1 through /{}. Keep typing after / to filter the full command list, or run /help for the complete catalog.",
-            commands.len()
-        ));
-    }
-
-    Ok(Some(commands[index - 1].clone()))
 }
 
 fn format_tool_call_start(name: &str, input: &str) -> String {
@@ -8538,38 +8473,21 @@ mod tests {
     }
 
     #[test]
-    fn slash_command_picker_selection_resolves_visible_numbers() {
-        let commands = vec![
-            "/help".to_string(),
-            "/status".to_string(),
-            "/diff".to_string(),
-        ];
+    fn slash_command_picker_entries_insert_argument_commands_for_editing() {
+        let entries = super::slash_command_picker_entries();
+        let status = entries
+            .iter()
+            .find(|entry| entry.command == "/status")
+            .expect("status entry should exist");
+        let model = entries
+            .iter()
+            .find(|entry| entry.command == "/model")
+            .expect("model entry should exist");
 
-        assert_eq!(
-            super::resolve_slash_command_picker_selection("/2", &commands)
-                .expect("numeric selection should parse"),
-            Some("/status".to_string())
-        );
-        assert_eq!(
-            super::resolve_slash_command_picker_selection("/status", &commands)
-                .expect("named command should bypass numeric picker"),
-            None
-        );
-        assert_eq!(
-            super::resolve_slash_command_picker_selection("/", &commands)
-                .expect("bare slash should not resolve a numeric selection"),
-            None
-        );
-    }
-
-    #[test]
-    fn slash_command_picker_selection_rejects_out_of_range_numbers() {
-        let commands = vec!["/help".to_string(), "/status".to_string()];
-
-        let error = super::resolve_slash_command_picker_selection("/3", &commands)
-            .expect_err("out-of-range selection should fail");
-        assert!(error.contains("/1 through /2"));
-        assert!(error.contains("/help"));
+        assert!(status.execute_immediately);
+        assert_eq!(status.insert_text, "/status");
+        assert!(!model.execute_immediately);
+        assert_eq!(model.insert_text, "/model ");
     }
 
     #[test]

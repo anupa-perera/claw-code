@@ -103,14 +103,14 @@ impl Helper for SlashCommandHelper {}
 
 struct SlashCommandMenuHandler<P: ExternalPrinter + Send> {
     printer: Mutex<P>,
-    help_text: Arc<str>,
+    menu_text: Arc<str>,
 }
 
 impl<P: ExternalPrinter + Send> SlashCommandMenuHandler<P> {
-    fn new(printer: P, help_text: Arc<str>) -> Self {
+    fn new(printer: P, menu_text: Arc<str>) -> Self {
         Self {
             printer: Mutex::new(printer),
-            help_text,
+            menu_text,
         }
     }
 }
@@ -125,7 +125,7 @@ impl<P: ExternalPrinter + Send> ConditionalEventHandler for SlashCommandMenuHand
     ) -> Option<Cmd> {
         if should_trigger_slash_command_menu(ctx.line(), ctx.pos()) {
             if let Ok(mut printer) = self.printer.lock() {
-                let _ = printer.print(format!("\n{}\n", self.help_text));
+                let _ = printer.print(format!("\n{}\n", self.menu_text));
             }
             return Some(Cmd::SelfInsert(n.max(1), '/'));
         }
@@ -149,7 +149,7 @@ impl LineEditor {
     pub fn with_slash_command_menu(
         prompt: impl Into<String>,
         completions: Vec<String>,
-        slash_help_text: Option<String>,
+        slash_menu_text: Option<String>,
     ) -> Self {
         let config = Config::builder()
             .completion_type(CompletionType::List)
@@ -160,13 +160,13 @@ impl LineEditor {
         editor.set_helper(Some(SlashCommandHelper::new(completions)));
         editor.bind_sequence(KeyEvent(KeyCode::Char('J'), Modifiers::CTRL), Cmd::Newline);
         editor.bind_sequence(KeyEvent(KeyCode::Enter, Modifiers::SHIFT), Cmd::Newline);
-        if let Some(slash_help_text) = slash_help_text.filter(|text| !text.trim().is_empty()) {
+        if let Some(slash_menu_text) = slash_menu_text.filter(|text| !text.trim().is_empty()) {
             if let Ok(printer) = editor.create_external_printer() {
                 editor.bind_sequence(
                     KeyEvent(KeyCode::Char('/'), Modifiers::NONE),
                     EventHandler::Conditional(Box::new(SlashCommandMenuHandler::new(
                         printer,
-                        Arc::<str>::from(slash_help_text),
+                        Arc::<str>::from(slash_menu_text),
                     ))),
                 );
             }
